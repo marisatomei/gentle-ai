@@ -404,8 +404,8 @@ func (s componentApplyStep) Run() error {
 		}
 		return nil
 	case model.ComponentGGA:
-		if _, err := cmdLookPath("gga"); err != nil {
-			// GGA not on PATH — install it.
+		if !ggaAvailable(s.profile) {
+			// GGA not found on any known PATH — install it.
 			commands, err := gga.InstallCommand(s.profile)
 			if err != nil {
 				return fmt.Errorf("resolve install command for component %q: %w", s.component, err)
@@ -494,6 +494,23 @@ func ResolveInstallProfile(detection system.DetectionResult) system.PlatformProf
 		PackageManager: "brew",
 		Supported:      true,
 	}
+}
+
+// ggaAvailable reports whether the gga binary is reachable. gga is often
+// installed to ~/.local/bin (the default for install.sh on Linux and Git Bash
+// on Windows), which is not always added to the process PATH. We check the
+// filesystem directly to avoid spawning a subprocess and to work regardless
+// of whether ~/.local/bin has been added to PATH.
+func ggaAvailable(_ system.PlatformProfile) bool {
+	if _, err := cmdLookPath("gga"); err == nil {
+		return true
+	}
+	homeDir, err := osUserHomeDir()
+	if err != nil {
+		return false
+	}
+	_, err = osStat(filepath.Join(homeDir, ".local", "bin", "gga"))
+	return err == nil
 }
 
 // runCommandSequence runs each command in the sequence one at a time, stopping on first error.
