@@ -134,11 +134,13 @@ func RenderModelPicker(
 	b.WriteString("\n\n")
 
 	if len(state.AvailableIDs) == 0 {
-		b.WriteString(styles.WarningStyle.Render("No providers detected. Set API key env vars and retry."))
-		b.WriteString("\n\n")
-		b.WriteString(renderOptions([]string{"Back"}, 0))
+		b.WriteString(styles.WarningStyle.Render("No providers detected."))
 		b.WriteString("\n")
-		b.WriteString(styles.HelpStyle.Render("enter: back"))
+		b.WriteString(styles.SubtextStyle.Render("Set API key env vars (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY) or switch to single mode."))
+		b.WriteString("\n\n")
+		b.WriteString(renderOptions([]string{"← Back to SDD mode"}, cursor))
+		b.WriteString("\n")
+		b.WriteString(styles.HelpStyle.Render("enter/esc: go back"))
 		return b.String()
 	}
 
@@ -183,8 +185,8 @@ func RenderModelPicker(
 	}
 
 	b.WriteString("\n")
-	backIdx := cursor - len(rows)
-	b.WriteString(renderOptions([]string{"Back"}, backIdx))
+	actionIdx := cursor - len(rows)
+	b.WriteString(renderOptions([]string{"Continue", "← Back"}, actionIdx))
 	b.WriteString("\n")
 	b.WriteString(styles.HelpStyle.Render("j/k: navigate • enter: cycle model / confirm • esc: back"))
 

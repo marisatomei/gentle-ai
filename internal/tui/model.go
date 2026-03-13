@@ -401,6 +401,13 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 		}
 		m.setScreen(ScreenPreset)
 	case ScreenModelPicker:
+		// When no providers are detected the screen only shows a "Back" option
+		// at cursor 0.  Handle that before the normal row-cycling logic.
+		if len(m.ModelPicker.AvailableIDs) == 0 {
+			// Go back to SDD mode so the user can switch to single mode.
+			m.setScreen(ScreenSDDMode)
+			return m, nil
+		}
 		rows := screens.ModelPickerRows()
 		if m.Cursor < len(rows) {
 			m.Selection.ModelAssignments = screens.CycleModelAssignment(
@@ -408,9 +415,15 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			)
 			return m, nil
 		}
-		// Back option — proceed to dependency tree.
-		m.buildDependencyPlan()
-		m.setScreen(ScreenDependencyTree)
+		// After the rows: Continue (cursor == len(rows)), Back (cursor == len(rows)+1).
+		if m.Cursor == len(rows) {
+			// Continue → proceed to dependency tree.
+			m.buildDependencyPlan()
+			m.setScreen(ScreenDependencyTree)
+			return m, nil
+		}
+		// Back → return to SDD mode screen.
+		m.setScreen(ScreenSDDMode)
 	case ScreenDependencyTree:
 		if m.Selection.Preset == model.PresetCustom {
 			allComps := screens.AllComponents()
@@ -545,9 +558,13 @@ func buildProgressLabels(resolved planner.ResolvedPlan) []string {
 
 func (m Model) goBack() Model {
 	// If going back from DependencyTree and the SDDMode screen was shown,
-	// navigate to SDDMode instead of Preset.
+	// navigate to the correct prior screen based on the selected SDD mode.
 	if m.Screen == ScreenDependencyTree && m.shouldShowSDDModeScreen() {
-		m.setScreen(ScreenSDDMode)
+		if m.Selection.SDDMode == model.SDDModeMulti {
+			m.setScreen(ScreenModelPicker)
+		} else {
+			m.setScreen(ScreenSDDMode)
+		}
 		return m
 	}
 
@@ -581,7 +598,10 @@ func (m Model) optionCount() int {
 	case ScreenSDDMode:
 		return len(screens.SDDModeOptions()) + 1
 	case ScreenModelPicker:
-		return len(screens.ModelPickerRows()) + 1 // rows + Back
+		if len(m.ModelPicker.AvailableIDs) == 0 {
+			return 1 // only "Back to SDD mode"
+		}
+		return len(screens.ModelPickerRows()) + 2 // rows + Continue + Back
 	case ScreenDependencyTree:
 		if m.Selection.Preset == model.PresetCustom {
 			return len(screens.AllComponents()) + len(screens.DependencyTreeOptions())
