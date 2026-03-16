@@ -9,7 +9,10 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/claude"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/cursor"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/gemini"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/opencode"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/vscode"
 	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/internal/components/mcp"
 	"github.com/gentleman-programming/gentle-ai/internal/components/persona"
@@ -22,6 +25,9 @@ var update = flag.Bool("update", false, "update golden files")
 
 func claudeAdapter() agents.Adapter   { return claude.NewAdapter() }
 func opencodeAdapter() agents.Adapter { return opencode.NewAdapter() }
+func cursorAdapter() agents.Adapter   { return cursor.NewAdapter() }
+func geminiAdapter() agents.Adapter   { return gemini.NewAdapter() }
+func vscodeAdapter() agents.Adapter   { return vscode.NewAdapter() }
 
 // ---------------------------------------------------------------------------
 // Existing golden tests (context7, presets, SDD command)
@@ -134,6 +140,108 @@ func TestGoldenSDD_OpenCode_Multi(t *testing.T) {
 	// Golden-check the settings file with multi overlay merged.
 	settingsJSON := readTestFile(t, filepath.Join(home, ".config", "opencode", "opencode.json"))
 	assertGolden(t, "sdd-opencode-multi-settings.golden", settingsJSON)
+}
+
+func TestGoldenSDD_Cursor(t *testing.T) {
+	home := t.TempDir()
+
+	result, err := sdd.Inject(home, cursorAdapter(), "")
+	if err != nil {
+		t.Fatalf("sdd.Inject(cursor) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("sdd.Inject(cursor) changed = false")
+	}
+
+	// Cursor writes SDD orchestrator to ~/.cursor/rules/gentle-ai.mdc.
+	rulesFile := readTestFile(t, filepath.Join(home, ".cursor", "rules", "gentle-ai.mdc"))
+	assertGolden(t, "sdd-cursor-rules.golden", rulesFile)
+
+	// Golden-check a representative SDD skill file.
+	skillInit := readTestFile(t, filepath.Join(home, ".cursor", "skills", "sdd-init", "SKILL.md"))
+	assertGolden(t, "sdd-cursor-skill-sdd-init.golden", skillInit)
+
+	// Verify ALL expected SDD skill files exist.
+	expectedSkills := []string{
+		"sdd-init", "sdd-apply", "sdd-archive", "sdd-explore",
+		"sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-verify",
+	}
+	skillsDir := filepath.Join(home, ".cursor", "skills")
+	for _, name := range expectedSkills {
+		path := filepath.Join(skillsDir, name, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected SDD skill file %q not found: %v", name, err)
+		}
+	}
+}
+
+func TestGoldenSDD_Gemini(t *testing.T) {
+	home := t.TempDir()
+
+	result, err := sdd.Inject(home, geminiAdapter(), "")
+	if err != nil {
+		t.Fatalf("sdd.Inject(gemini) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("sdd.Inject(gemini) changed = false")
+	}
+
+	// Gemini writes SDD orchestrator to ~/.gemini/GEMINI.md.
+	geminiMD := readTestFile(t, filepath.Join(home, ".gemini", "GEMINI.md"))
+	assertGolden(t, "sdd-gemini-geminimd.golden", geminiMD)
+
+	// Golden-check a representative SDD skill file.
+	skillInit := readTestFile(t, filepath.Join(home, ".gemini", "skills", "sdd-init", "SKILL.md"))
+	assertGolden(t, "sdd-gemini-skill-sdd-init.golden", skillInit)
+
+	// Verify ALL expected SDD skill files exist.
+	expectedSkills := []string{
+		"sdd-init", "sdd-apply", "sdd-archive", "sdd-explore",
+		"sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-verify",
+	}
+	skillsDir := filepath.Join(home, ".gemini", "skills")
+	for _, name := range expectedSkills {
+		path := filepath.Join(skillsDir, name, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected SDD skill file %q not found: %v", name, err)
+		}
+	}
+}
+
+func TestGoldenSDD_VSCode(t *testing.T) {
+	home := t.TempDir()
+
+	adapter := vscodeAdapter()
+
+	result, err := sdd.Inject(home, adapter, "")
+	if err != nil {
+		t.Fatalf("sdd.Inject(vscode) error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("sdd.Inject(vscode) changed = false")
+	}
+
+	// VS Code writes to a platform-specific path — use the adapter to resolve it.
+	promptPath := adapter.SystemPromptFile(home)
+	instructionsFile := readTestFile(t, promptPath)
+	assertGolden(t, "sdd-vscode-instructions.golden", instructionsFile)
+
+	// Golden-check a representative SDD skill file.
+	skillInit := readTestFile(t, filepath.Join(home, ".copilot", "skills", "sdd-init", "SKILL.md"))
+	assertGolden(t, "sdd-vscode-skill-sdd-init.golden", skillInit)
+
+	// Verify ALL expected SDD skill files exist.
+	expectedSkills := []string{
+		"sdd-init", "sdd-apply", "sdd-archive", "sdd-explore",
+		"sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-verify",
+	}
+	skillsDir := filepath.Join(home, ".copilot", "skills")
+	for _, name := range expectedSkills {
+		path := filepath.Join(skillsDir, name, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected SDD skill file %q not found: %v", name, err)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

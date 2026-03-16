@@ -1121,6 +1121,82 @@ func TestRunInstallEngramBrewSkipsGoCheck(t *testing.T) {
 	}
 }
 
+// TestRunInstallDryRunMatchesActualInstall verifies parity: every file path
+// reported by the dry-run plan is actually created by the real install.
+//
+// Strategy:
+//  1. Run with DryRun=true to obtain the resolved plan (agents + ordered components).
+//  2. Derive the expected file paths from the plan using componentPaths() — the
+//     same function the runtime uses for backup targets and post-apply verification.
+//  3. Run the real install (same flags, same mocks, fresh temp dir).
+//  4. Assert that every expected file exists on disk — no missing files.
+func TestRunInstallDryRunMatchesActualInstall(t *testing.T) {
+	// ── Phase 1: dry-run — resolve the plan ───────────────────────────────────
+	// We do NOT need temp dir or mocks for dry-run; it never touches the FS.
+	installArgs := []string{"--agent", "opencode", "--component", "permissions"}
+	dryRunArgs := append([]string{"--dry-run"}, installArgs...)
+	dryResult, err := RunInstall(dryRunArgs, system.DetectionResult{})
+	if err != nil {
+		t.Fatalf("dry-run RunInstall() error = %v", err)
+	}
+	if !dryResult.DryRun {
+		t.Fatalf("expected DryRun=true in result, got false")
+	}
+
+	// Use a synthetic home dir for path computation — the paths are derived
+	// from the resolved plan (agents + components) and will use this root.
+	// We reuse the same dir for the real install so the paths are identical.
+	home := t.TempDir()
+
+	// Derive expected file paths from the dry-run plan.  componentPaths() is
+	// the single source of truth that both backup and verification use.
+	adapters := resolveAdapters(dryResult.Resolved.Agents)
+	var expectedPaths []string
+	for _, component := range dryResult.Resolved.OrderedComponents {
+		expectedPaths = append(expectedPaths, componentPaths(home, dryResult.Selection, adapters, component)...)
+	}
+	if len(expectedPaths) == 0 {
+		t.Fatal("dry-run resolved zero file paths — test is misconfigured")
+	}
+
+	// ── Phase 2: real install — apply the plan ────────────────────────────────
+	restoreHome := osUserHomeDir
+	restoreCommand := runCommand
+	restoreLookPath := cmdLookPath
+	t.Cleanup(func() {
+		osUserHomeDir = restoreHome
+		runCommand = restoreCommand
+		cmdLookPath = restoreLookPath
+	})
+
+	osUserHomeDir = func() (string, error) { return home, nil }
+	runCommand = func(string, ...string) error { return nil }
+	cmdLookPath = missingBinaryLookPath
+
+	realResult, err := RunInstall(installArgs, system.DetectionResult{})
+	if err != nil {
+		t.Fatalf("real RunInstall() error = %v", err)
+	}
+	if !realResult.Verify.Ready {
+		t.Fatalf("post-apply verification not ready: %#v", realResult.Verify)
+	}
+
+	// ── Phase 3: parity assertion ─────────────────────────────────────────────
+	// Every file the dry-run said would be touched must exist on disk.
+	var missing []string
+	for _, path := range expectedPaths {
+		if _, statErr := os.Stat(path); statErr != nil {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("dry-run planned %d file(s) that were NOT created by the real install:", len(missing))
+		for _, p := range missing {
+			t.Errorf("  missing: %s", p)
+		}
+	}
+}
+
 func TestEnsureGoAvailableAfterInstallWindowsRefreshesPath(t *testing.T) {
 	restoreLookPath := cmdLookPath
 	restoreStat := osStat
@@ -1177,3 +1253,115 @@ func (fakeFileInfo) Mode() os.FileMode  { return 0 }
 func (fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (fakeFileInfo) IsDir() bool        { return false }
 func (fakeFileInfo) Sys() any           { return nil }
+
+// TestRunInstallUpgradeIdempotency verifies that running install twice with the
+// same configuration does NOT duplicate any content.  The second run must be a
+// no-op or a clean update — never an append of already-present sections or MCP
+// entries.
+func TestRunInstallUpgradeIdempotency(t *testing.T) {
+	home := t.TempDir()
+	restoreHome := osUserHomeDir
+	restoreCommand := runCommand
+	restoreLookPath := cmdLookPath
+	t.Cleanup(func() {
+		osUserHomeDir = restoreHome
+		runCommand = restoreCommand
+		cmdLookPath = restoreLookPath
+	})
+
+	osUserHomeDir = func() (string, error) { return home, nil }
+	runCommand = func(string, ...string) error { return nil }
+	// Simulate all binaries already on PATH so install steps are skipped and
+	// the test only exercises injection idempotency.
+	cmdLookPath = func(name string) (string, error) {
+		return "/usr/local/bin/" + name, nil
+	}
+
+	args := []string{
+		"--agent", "claude-code",
+		"--component", "sdd",
+		"--component", "engram",
+		"--component", "persona",
+	}
+
+	// --- Run 1 ---
+	result1, err := RunInstall(args, system.DetectionResult{})
+	if err != nil {
+		t.Fatalf("RunInstall() run 1 error = %v", err)
+	}
+	if !result1.Verify.Ready {
+		t.Fatalf("run 1: verify.Ready = false, report = %#v", result1.Verify)
+	}
+
+	// Capture all relevant output files after the first run.
+	claudeMDPath := filepath.Join(home, ".claude", "CLAUDE.md")
+	engramMCPPath := filepath.Join(home, ".claude", "mcp", "engram.json")
+
+	claudeMDAfterRun1, err := os.ReadFile(claudeMDPath)
+	if err != nil {
+		t.Fatalf("run 1: ReadFile(%q) error = %v", claudeMDPath, err)
+	}
+	engramMCPAfterRun1, err := os.ReadFile(engramMCPPath)
+	if err != nil {
+		t.Fatalf("run 1: ReadFile(%q) error = %v", engramMCPPath, err)
+	}
+
+	// --- Run 2 (same flags) ---
+	result2, err := RunInstall(args, system.DetectionResult{})
+	if err != nil {
+		t.Fatalf("RunInstall() run 2 error = %v", err)
+	}
+	if !result2.Verify.Ready {
+		t.Fatalf("run 2: verify.Ready = false, report = %#v", result2.Verify)
+	}
+
+	// Capture output files after the second run.
+	claudeMDAfterRun2, err := os.ReadFile(claudeMDPath)
+	if err != nil {
+		t.Fatalf("run 2: ReadFile(%q) error = %v", claudeMDPath, err)
+	}
+	engramMCPAfterRun2, err := os.ReadFile(engramMCPPath)
+	if err != nil {
+		t.Fatalf("run 2: ReadFile(%q) error = %v", engramMCPPath, err)
+	}
+
+	// --- Assertions ---
+
+	// 1. File bytes must be identical between the two runs.
+	if string(claudeMDAfterRun1) != string(claudeMDAfterRun2) {
+		t.Errorf("CLAUDE.md changed between run 1 and run 2 (idempotency violation):\n--- run1 ---\n%s\n--- run2 ---\n%s",
+			claudeMDAfterRun1, claudeMDAfterRun2)
+	}
+	if string(engramMCPAfterRun1) != string(engramMCPAfterRun2) {
+		t.Errorf("engram MCP config changed between run 1 and run 2 (idempotency violation):\n--- run1 ---\n%s\n--- run2 ---\n%s",
+			engramMCPAfterRun1, engramMCPAfterRun2)
+	}
+
+	// 2. No duplicate "## Agent Teams Orchestrator" headings in CLAUDE.md.
+	content := string(claudeMDAfterRun2)
+	orchestratorCount := strings.Count(content, "## Agent Teams Orchestrator")
+	if orchestratorCount > 1 {
+		t.Errorf("CLAUDE.md contains %d occurrences of '## Agent Teams Orchestrator', want at most 1:\n%s",
+			orchestratorCount, content)
+	}
+
+	// 3. No duplicate gentle-ai marker blocks — each section's open marker
+	// must appear exactly once.
+	for _, sectionID := range []string{"sdd-orchestrator", "engram-protocol"} {
+		openMarker := "<!-- gentle-ai:" + sectionID + " -->"
+		count := strings.Count(content, openMarker)
+		if count != 1 {
+			t.Errorf("CLAUDE.md contains %d occurrences of marker %q, want exactly 1:\n%s",
+				count, openMarker, content)
+		}
+	}
+
+	// 4. Engram MCP JSON must not contain duplicate keys.
+	// A simple structural check: "command" key should appear exactly once.
+	engramJSON := string(engramMCPAfterRun2)
+	commandCount := strings.Count(engramJSON, `"command"`)
+	if commandCount != 1 {
+		t.Errorf("engram MCP JSON contains %d occurrences of \"command\", want exactly 1:\n%s",
+			commandCount, engramJSON)
+	}
+}
