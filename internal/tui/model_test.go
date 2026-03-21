@@ -10,6 +10,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/pipeline"
 	"github.com/gentleman-programming/gentle-ai/internal/planner"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
+	"github.com/gentleman-programming/gentle-ai/internal/tui/screens"
 )
 
 func TestNavigationWelcomeToDetection(t *testing.T) {
@@ -336,11 +337,5 @@ func TestShouldShowSDDModeScreen(t *testing.T) {
 }
 
 func screensAgentOptions() []model.AgentID {
-	return []model.AgentID{
-		model.AgentClaudeCode,
-		model.AgentOpenCode,
-		model.AgentGeminiCLI,
-		model.AgentCursor,
-		model.AgentVSCodeCopilot,
-	}
+	return screens.AgentOptions()
 }

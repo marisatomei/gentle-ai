@@ -56,6 +56,8 @@ cleanup_test_env() {
     rm -rf "$HOME/.config/opencode" 2>/dev/null || true
     rm -rf "$HOME/.config/gga" 2>/dev/null || true
     rm -rf "$HOME/.claude" 2>/dev/null || true
+    rm -rf "$HOME/.codex" 2>/dev/null || true
+    rm -rf "$HOME/.gemini" 2>/dev/null || true
     rm -rf "$HOME/.gentle-ai" 2>/dev/null || true
     mkdir -p "$HOME/.config"
 }
