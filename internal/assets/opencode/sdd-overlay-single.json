@@ -1,7 +1,6 @@
 {
   "agent": {
     "sdd-orchestrator": {
-      "model": "anthropic/claude-sonnet-4-6",
       "mode": "all",
       "description": "Gentleman personality + SDD delegate-only orchestrator",
       "prompt": "{file:./AGENTS.md}",
