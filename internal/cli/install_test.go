@@ -44,6 +44,7 @@ func TestNormalizeInstallFlagsDefaults(t *testing.T) {
 
 	want := model.Selection{
 		Agents:  []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode, model.AgentGeminiCLI, model.AgentCodex, model.AgentCursor, model.AgentVSCodeCopilot, model.AgentAntigravity},
+		Agents:  []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode, model.AgentGeminiCLI, model.AgentCodex, model.AgentCursor, model.AgentVSCodeCopilot, model.AgentWindsurf},
 		Persona: model.PersonaGentleman,
 		Preset:  model.PresetFullGentleman,
 		Components: []model.ComponentID{
@@ -184,6 +185,7 @@ func makeDetectionWithAgents(present ...string) system.DetectionResult {
 	var configs []system.ConfigState
 	// Full canonical agent set — mirrors knownAgentConfigDirs in config_scan.go.
 	known := []string{"claude-code", "opencode", "gemini-cli", "cursor", "vscode-copilot", "codex", "antigravity"}
+	known := []string{"claude-code", "opencode", "gemini-cli", "cursor", "vscode-copilot", "codex", "windsurf"}
 	presentSet := make(map[string]bool, len(present))
 	for _, p := range present {
 		presentSet[p] = true
@@ -235,6 +237,7 @@ func TestDefaultAgentsFromDetection_AllAgentsMappedCorrectly(t *testing.T) {
 		{"vscode-copilot", model.AgentVSCodeCopilot},
 		{"codex", model.AgentCodex},
 		{"antigravity", model.AgentAntigravity},
+		{"windsurf", model.AgentWindsurf},
 	}
 
 	for _, tt := range tests {

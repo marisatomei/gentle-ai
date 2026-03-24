@@ -10,6 +10,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/agents/gemini"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/opencode"
 	"github.com/gentleman-programming/gentle-ai/internal/agents/vscode"
+	"github.com/gentleman-programming/gentle-ai/internal/agents/windsurf"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 )
 
@@ -29,6 +30,8 @@ func NewAdapter(agent model.AgentID) (Adapter, error) {
 		return codex.NewAdapter(), nil
 	case model.AgentAntigravity:
 		return antigravity.NewAdapter(), nil
+	case model.AgentWindsurf:
+		return windsurf.NewAdapter(), nil
 	default:
 		return nil, AgentNotSupportedError{Agent: agent}
 	}
@@ -45,6 +48,7 @@ func NewDefaultRegistry() (*Registry, error) {
 		model.AgentVSCodeCopilot,
 		model.AgentCodex,
 		model.AgentAntigravity,
+		model.AgentWindsurf,
 	} {
 		adapter, err := NewAdapter(agent)
 		if err != nil {
