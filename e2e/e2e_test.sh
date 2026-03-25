@@ -1505,7 +1505,7 @@ test_oc_sdd_multi_mode_injection() {
     fi
 }
 
-test_oc_sdd_single_mode_no_subagents() {
+test_oc_sdd_single_mode_no_models() {
     log_test "OpenCode: SDD single mode has all agents but no model overrides"
     cleanup_test_env
 
@@ -1795,7 +1795,7 @@ if [ "${RUN_FULL_E2E:-0}" = "1" ]; then
 
     # Category 9: SDD multi-mode
     test_oc_sdd_multi_mode_injection
-    test_oc_sdd_single_mode_no_subagents
+    test_oc_sdd_single_mode_no_models
     test_oc_sdd_default_mode_same_as_single
 else
     log_skip "Tier 2 tests (set RUN_FULL_E2E=1 to enable)"
