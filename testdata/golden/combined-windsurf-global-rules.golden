@@ -126,7 +126,7 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
 
-Read this table at session start (or before the first phase), cache it for the session. Since Windsurf uses a single model (Cascade), these assignments are **advisory** — they indicate which phases require deeper reasoning vs. mechanical execution. Adjust your reasoning depth accordingly.
+Read this table at session start. Windsurf Cascade supports multiple models — if your current model matches a phase's recommended alias, proceed normally. If you cannot switch models mid-session, use the table as a reasoning-depth guide: phases assigned to `opus` require deeper architectural thinking, while `haiku` phases are mechanical.
 
 | Phase | Default Model | Reason |
 |-------|---------------|--------|
@@ -160,7 +160,7 @@ Use this decision tree BEFORE any SDD phase to determine scope:
 
 ### Plan Mode
 
-Windsurf's **Plan Mode** creates `.md` files in `~/.windsurf/plans/` that persist across sessions and can be @mentioned in any future conversation. This makes Plan Mode ideal for SDD spec and design artifacts on Large changes — they survive session resets without requiring Engram.
+Windsurf's **Plan Mode** creates structured plan documents that persist across sessions and can be @mentioned in any future conversation. Use Plan Mode for large SDD changes where spec and design artifacts benefit from cross-session persistence beyond Engram.
 
 Use Plan Mode to:
 - Draft and track 3-7 high-level steps before executing (Medium changes)
@@ -216,7 +216,7 @@ Approve to proceed with implementation?
 - ❌ **"No" / "Wait" / "Change X"** → Revise plan, present again
 - ⏸️ **No response** → DO NOT proceed. Wait.
 
-## Skill Resolver Protocol
+### Skill Resolver Protocol
 
 Since Cascade is a solo-agent, skill resolution runs inline before each phase. Do this ONCE per session (or after compaction):
 
@@ -236,11 +236,11 @@ Before each phase execution:
 
 After completing each phase, check the `skill_resolution` field in your own result:
 - `injected` → all good, skills were applied correctly
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately before the next phase.
+- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and re-apply compact rules for all subsequent phases.
 
 This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate you dropped context between phases.
 
-## Phase Execution Protocol
+### Phase Execution Protocol
 
 Since there are no sub-agents, YOU read and write all artifacts directly. Each phase has explicit read/write rules:
 
@@ -255,9 +255,16 @@ Since there are no sub-agents, YOU read and write all artifacts directly. Each p
 | `sdd-verify` | spec + tasks | `verify-report` |
 | `sdd-archive` | all artifacts | `archive-report` |
 
-For phases with required dependencies, retrieve artifacts from Engram using topic keys before starting the phase. Do NOT rely on conversation history alone — conversation context is lossy across sessions.
+For phases with required dependencies, retrieve artifacts from Engram using topic keys before starting the phase. Pass artifact references (topic keys), NOT full content. Retrieve full content only when actively working on that phase — do not inline entire specs or designs into conversation context. Do NOT rely on conversation history alone — conversation context is lossy across sessions.
 
 For Large changes using Plan Mode: after writing specs and design artifacts to Engram, also save them as Plan Mode files so they can be @mentioned in future sessions.
+
+### Non-SDD Tasks
+
+When executing general (non-SDD) work:
+1. Search engram (`mem_search`) for relevant prior context before starting
+2. If you make important discoveries, decisions, or fix bugs, save them to engram via `mem_save`
+3. Do NOT rely solely on conversation history — persist important findings to engram for cross-session durability
 
 ## Engram Topic Key Format
 
@@ -280,7 +287,7 @@ Retrieve full content via two steps:
 
 ## State and Conventions
 
-Convention files under the global skills directory or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.codeium/windsurf/skills/_shared/` (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
 
 DAG state is tracked in Engram under `sdd/{change-name}/state`. Update it after each phase completes so `/sdd-continue` knows which phase to run next.
 
