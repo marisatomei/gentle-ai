@@ -146,6 +146,24 @@ func (a *Adapter) SupportsMCP() bool {
 	return true
 }
 
+// --- Sub-agent support (Copilot CLI custom agents in ~/.copilot/agents/) ---
+
+func (a *Adapter) SupportsSubAgents() bool {
+	return true
+}
+
+func (a *Adapter) SubAgentsDir(homeDir string) string {
+	return filepath.Join(homeDir, ".copilot", "agents")
+}
+
+func (a *Adapter) EmbeddedSubAgentsDir() string {
+	return "copilot-cli/agents"
+}
+
+func (a *Adapter) SubAgentFileSuffix() string {
+	return ".agent.md"
+}
+
 func defaultStat(path string) statResult {
 	info, err := os.Stat(path)
 	if err != nil {

@@ -65,6 +65,9 @@ type subAgentInjector interface {
 	// EmbeddedSubAgentsDir returns the path inside the embedded assets FS
 	// where this adapter's sub-agent sources live (e.g. "cursor/agents").
 	EmbeddedSubAgentsDir() string
+	// SubAgentFileSuffix returns the file extension used for sub-agent files.
+	// Cursor uses ".md", Copilot CLI uses ".agent.md".
+	SubAgentFileSuffix() string
 }
 
 // monorepoRootMarkers identify files/dirs that ONLY exist at the true root
@@ -481,10 +484,11 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 		}
 
 		// Post-check: verify critical agent files exist
+		suffix := sai.SubAgentFileSuffix()
 		for _, phase := range []string{"sdd-apply", "sdd-verify"} {
-			checkPath := filepath.Join(agentsDir, phase+".md")
+			checkPath := filepath.Join(agentsDir, phase+suffix)
 			if info, err := os.Stat(checkPath); err != nil || info.Size() < 50 {
-				return InjectionResult{}, fmt.Errorf("post-check: cursor agent %q not written correctly", phase)
+				return InjectionResult{}, fmt.Errorf("post-check: %s agent %q not written correctly", adapter.Agent(), phase)
 			}
 		}
 	}

@@ -153,6 +153,10 @@ func (a *Adapter) EmbeddedSubAgentsDir() string {
 	return "cursor/agents"
 }
 
+func (a *Adapter) SubAgentFileSuffix() string {
+	return ".md"
+}
+
 func defaultStat(path string) statResult {
 	info, err := os.Stat(path)
 	if err != nil {

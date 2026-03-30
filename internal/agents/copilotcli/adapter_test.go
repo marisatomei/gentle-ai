@@ -218,4 +218,21 @@ func TestCapabilities(t *testing.T) {
 	if got := a.SupportsSystemPrompt(); !got {
 		t.Fatal("SupportsSystemPrompt() = false, want true")
 	}
+
+	// Sub-agent support
+	if got := a.SupportsSubAgents(); !got {
+		t.Fatal("SupportsSubAgents() = false, want true")
+	}
+
+	if got := a.SubAgentsDir("/tmp/home"); got != filepath.Join("/tmp/home", ".copilot", "agents") {
+		t.Fatalf("SubAgentsDir() = %q, want %q", got, filepath.Join("/tmp/home", ".copilot", "agents"))
+	}
+
+	if got := a.EmbeddedSubAgentsDir(); got != "copilot-cli/agents" {
+		t.Fatalf("EmbeddedSubAgentsDir() = %q, want %q", got, "copilot-cli/agents")
+	}
+
+	if got := a.SubAgentFileSuffix(); got != ".agent.md" {
+		t.Fatalf("SubAgentFileSuffix() = %q, want %q", got, ".agent.md")
+	}
 }
