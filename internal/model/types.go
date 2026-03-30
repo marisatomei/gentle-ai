@@ -11,6 +11,7 @@ const (
 	AgentCodex         AgentID = "codex"
 	AgentAntigravity   AgentID = "antigravity"
 	AgentWindsurf      AgentID = "windsurf"
+	AgentCopilotCLI    AgentID = "copilot-cli"
 )
 
 // SupportTier indicates how fully an agent supports the Gentleman AI ecosystem.

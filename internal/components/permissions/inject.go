@@ -94,6 +94,9 @@ func agentOverlay(id model.AgentID) []byte {
 	case model.AgentCodex:
 		// Codex has no known settings.json path; permissions are skipped.
 		return nil
+	case model.AgentCopilotCLI:
+		// Copilot CLI has no injectable settings.json; permissions are skipped.
+		return nil
 	default:
 		return nil
 	}

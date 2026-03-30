@@ -43,6 +43,8 @@ func (profileResolver) ResolveAgentInstall(profile system.PlatformProfile, agent
 		return resolveClaudeCodeInstall(profile), nil
 	case model.AgentOpenCode:
 		return resolveOpenCodeInstall(profile)
+	case model.AgentCopilotCLI:
+		return resolveCopilotCLIInstall(profile)
 	default:
 		return nil, fmt.Errorf("install command is not supported for agent %q", agent)
 	}
@@ -116,6 +118,30 @@ func resolveOpenCodeInstall(profile system.PlatformProfile) (CommandSequence, er
 	default:
 		return nil, fmt.Errorf(
 			"unsupported platform for opencode: os=%q distro=%q pm=%q",
+			profile.OS, profile.LinuxDistro, profile.PackageManager,
+		)
+	}
+}
+
+// resolveCopilotCLIInstall returns the correct install command sequence for Copilot CLI per platform.
+// - darwin (brew): brew install copilot-cli
+// - linux: npm install -g @github/copilot (requires Node.js 22+)
+// - windows: winget install GitHub.Copilot
+// See https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli
+func resolveCopilotCLIInstall(profile system.PlatformProfile) (CommandSequence, error) {
+	switch profile.PackageManager {
+	case "brew":
+		return CommandSequence{{"brew", "install", "copilot-cli"}}, nil
+	case "apt", "pacman", "dnf":
+		if profile.NpmWritable {
+			return CommandSequence{{"npm", "install", "-g", "@github/copilot"}}, nil
+		}
+		return CommandSequence{{"sudo", "npm", "install", "-g", "@github/copilot"}}, nil
+	case "winget":
+		return CommandSequence{{"winget", "install", "--id", "GitHub.Copilot", "-e", "--accept-source-agreements", "--accept-package-agreements"}}, nil
+	default:
+		return nil, fmt.Errorf(
+			"unsupported platform for copilot-cli: os=%q distro=%q pm=%q",
 			profile.OS, profile.LinuxDistro, profile.PackageManager,
 		)
 	}
