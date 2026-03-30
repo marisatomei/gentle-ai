@@ -1,10 +1,28 @@
 package system
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// stubLookPath replaces lookPathFunc for the duration of the test and restores
+// it on cleanup. The provided function controls which binaries are "found".
+func stubLookPath(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	orig := lookPathFunc
+	lookPathFunc = fn
+	t.Cleanup(func() { lookPathFunc = orig })
+}
+
+// noBinaries makes all binary lookups fail — the default for most tests.
+func noBinaries(t *testing.T) {
+	t.Helper()
+	stubLookPath(t, func(name string) (string, error) {
+		return "", fmt.Errorf("%s: not found (stubbed)", name)
+	})
+}
 
 // TestScanConfigs_ReturnsAllKnownAgentsWithExistsFlag verifies the canonical
 // ScanConfigs contract: ALL known registry agents are returned, with Exists=true
@@ -14,6 +32,7 @@ import (
 // every known agent. The shim must enumerate all adapters from the default
 // registry, not just the ones that are installed.
 func TestScanConfigs_ReturnsAllKnownAgentsWithExistsFlag(t *testing.T) {
+	noBinaries(t)
 	home := t.TempDir()
 
 	// Create only claude-code config dir — others intentionally absent.
@@ -65,6 +84,7 @@ func TestScanConfigs_ReturnsAllKnownAgentsWithExistsFlag(t *testing.T) {
 // in each ConfigState matches the canonical model.AgentID string values used
 // by the TUI and validate.go switch statements.
 func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
+	noBinaries(t)
 	home := t.TempDir()
 	configs := ScanConfigs(home)
 
@@ -76,6 +96,7 @@ func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
 		"cursor":         false,
 		"vscode-copilot": false,
 		"codex":          false,
+		"copilot-cli":    false,
 	}
 
 	for _, c := range configs {
@@ -95,6 +116,7 @@ func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
 // TestScanConfigs_PathFieldIsNonEmpty verifies that every ConfigState has a
 // non-empty Path — the TUI and validate.go use the path for display purposes.
 func TestScanConfigs_PathFieldIsNonEmpty(t *testing.T) {
+	noBinaries(t)
 	home := t.TempDir()
 	configs := ScanConfigs(home)
 
@@ -108,6 +130,7 @@ func TestScanConfigs_PathFieldIsNonEmpty(t *testing.T) {
 // TestScanConfigs_ExistsFalseWhenDirAbsent verifies that agents whose
 // GlobalConfigDir does not exist on disk have Exists=false.
 func TestScanConfigs_ExistsFalseWhenDirAbsent(t *testing.T) {
+	noBinaries(t)
 	home := t.TempDir()
 	// No dirs created — all agents should have Exists=false.
 
@@ -123,6 +146,7 @@ func TestScanConfigs_ExistsFalseWhenDirAbsent(t *testing.T) {
 // TestScanConfigs_IsDirectorySetForExistingDirs verifies that IsDirectory is
 // set correctly for existing directories.
 func TestScanConfigs_IsDirectorySetForExistingDirs(t *testing.T) {
+	noBinaries(t)
 	home := t.TempDir()
 
 	// Create two agent dirs.
@@ -155,6 +179,71 @@ func TestScanConfigs_IsDirectorySetForExistingDirs(t *testing.T) {
 	}
 	if !opencodeFound {
 		t.Error("ScanConfigs() missing opencode entry")
+	}
+}
+
+// TestScanConfigs_BinaryDetection verifies that agents with a Binary field
+// are detected via exec.LookPath instead of config directory existence.
+func TestScanConfigs_BinaryDetection(t *testing.T) {
+	home := t.TempDir()
+
+	// Stub: only "copilot" binary is found on PATH.
+	stubLookPath(t, func(name string) (string, error) {
+		if name == "copilot" {
+			return "/usr/bin/copilot", nil
+		}
+		return "", fmt.Errorf("%s: not found", name)
+	})
+
+	configs := ScanConfigs(home)
+
+	var copilotState *ConfigState
+	for i := range configs {
+		if configs[i].Agent == "copilot-cli" {
+			copilotState = &configs[i]
+			break
+		}
+	}
+
+	if copilotState == nil {
+		t.Fatalf("ScanConfigs() missing copilot-cli entry")
+	}
+	if !copilotState.Exists {
+		t.Errorf("copilot-cli: Exists = false, want true (binary stubbed as found)")
+	}
+
+	// vscode-copilot should NOT be detected (no ~/.copilot dir created).
+	for _, c := range configs {
+		if c.Agent == "vscode-copilot" && c.Exists {
+			t.Errorf("vscode-copilot: Exists = true, want false (dir not created, detection is dir-based)")
+		}
+	}
+}
+
+// TestScanConfigs_BinaryNotFound verifies copilot-cli shows missing when
+// the binary is not on PATH, even if ~/.copilot directory exists.
+func TestScanConfigs_BinaryNotFound(t *testing.T) {
+	noBinaries(t)
+	home := t.TempDir()
+
+	// Create ~/.copilot — this should make vscode-copilot present but NOT copilot-cli.
+	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	configs := ScanConfigs(home)
+
+	for _, c := range configs {
+		switch c.Agent {
+		case "copilot-cli":
+			if c.Exists {
+				t.Errorf("copilot-cli: Exists = true, want false (binary not on PATH)")
+			}
+		case "vscode-copilot":
+			if !c.Exists {
+				t.Errorf("vscode-copilot: Exists = false, want true (dir exists)")
+			}
+		}
 	}
 }
 
