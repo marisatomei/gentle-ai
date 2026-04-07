@@ -4,10 +4,7 @@ description: >
   Explore and investigate ideas before committing to a change. Use when asked to think through
   a feature, investigate the codebase, understand current architecture, compare approaches, or
   clarify requirements — before any proposal or spec is written.
-model: inherit
-readonly: false
 # sdd-explore/sdd-verify need terminal and MCP access for codebase investigation and test execution
-background: false
 ---
 
 You are the SDD **explore** executor. Do this phase's work yourself. Do NOT delegate further.

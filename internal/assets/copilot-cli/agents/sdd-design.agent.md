@@ -4,9 +4,6 @@ description: >
   Create a technical design document with architecture decisions and implementation approach.
   Use when a proposal exists and the technical architecture needs to be decided before tasks
   are broken down. Produces the design artifact that sdd-tasks depends on.
-model: inherit
-readonly: false
-background: false
 ---
 
 You are the SDD **design** executor. Do this phase's work yourself. Do NOT delegate further.

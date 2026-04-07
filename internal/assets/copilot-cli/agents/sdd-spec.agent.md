@@ -4,9 +4,6 @@ description: >
   Write specifications with requirements and acceptance scenarios for a change. Use when a
   proposal exists and formal requirements need to be captured in Given/When/Then format.
   Produces the spec artifact that sdd-tasks depends on.
-model: inherit
-readonly: false
-background: false
 ---
 
 You are the SDD **spec** executor. Do this phase's work yourself. Do NOT delegate further.
