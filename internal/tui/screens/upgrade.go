@@ -25,7 +25,11 @@ func SpinnerChar(frame int) string {
 //  2. !updateCheckDone → "Checking for updates..." with spinner
 //  3. upgradeReport != nil → show upgrade results (success/failure per tool)
 //  4. upgradeErr != nil (and report == nil) → show error with return prompt
-//  5. Otherwise → show list of tools with status, option to upgrade
+//  5. Otherwise → show list of tools with status; cursor selects individual tool or "Upgrade All"
+//
+// In state 5, cursor maps as follows:
+//   - cursor 0..N-1 → individual upgradeable tools (N = count of UpdateAvailable results)
+//   - cursor N      → "Upgrade All" row (only rendered when N > 1)
 func RenderUpgrade(results []update.UpdateResult, report *upgrade.UpgradeReport, upgradeErr error, operationRunning bool, updateCheckDone bool, cursor int, spinnerFrame int) string {
 	var b strings.Builder
 
@@ -62,22 +66,35 @@ func RenderUpgrade(results []update.UpdateResult, report *upgrade.UpgradeReport,
 	}
 
 	// State 5: ready state — show tool list and upgrade prompt
-	return renderUpgradeReady(&b, results)
+	return renderUpgradeReady(&b, results, cursor)
 }
 
-func renderUpgradeReady(b *strings.Builder, results []update.UpdateResult) string {
-	hasUpdates := false
+func renderUpgradeReady(b *strings.Builder, results []update.UpdateResult, cursor int) string {
+	// Count how many tools have an available update (cursor navigates only these + "All").
+	upgradeableCount := 0
+	for _, r := range results {
+		if r.Status == update.UpdateAvailable {
+			upgradeableCount++
+		}
+	}
+
+	upgradeableIdx := 0 // index within the upgradeable slice as we iterate
 
 	for _, r := range results {
 		switch r.Status {
 		case update.UpdateAvailable:
-			hasUpdates = true
+			selected := upgradeableIdx == cursor
+			prefix := "  "
+			if selected {
+				prefix = styles.Cursor
+			}
 			line := fmt.Sprintf("%s  %s → %s",
 				r.Tool.Name,
 				styles.SubtextStyle.Render(r.InstalledVersion),
 				styles.SuccessStyle.Render(r.LatestVersion),
 			)
-			b.WriteString("  " + styles.WarningStyle.Render("↑") + "  " + line)
+			b.WriteString(prefix + styles.WarningStyle.Render("↑") + "  " + line)
+			upgradeableIdx++
 		case update.UpToDate:
 			line := styles.SelectedStyle.Render(r.Tool.Name) + "  " + styles.SuccessStyle.Render("✓ up to date")
 			if r.InstalledVersion != "" {
@@ -99,17 +116,28 @@ func renderUpgradeReady(b *strings.Builder, results []update.UpdateResult) strin
 
 	b.WriteString("\n")
 
-	if hasUpdates {
-		b.WriteString(styles.HeadingStyle.Render("Press enter to upgrade all"))
-	} else {
+	if upgradeableCount == 0 {
 		b.WriteString(styles.SuccessStyle.Render("✓ All tools are up to date"))
+		b.WriteString("\n\n")
+		b.WriteString(styles.HelpStyle.Render("esc: back • q: quit"))
+		return b.String()
 	}
 
-	b.WriteString("\n\n")
-	if hasUpdates {
-		b.WriteString(styles.HelpStyle.Render("enter: upgrade • esc: back • q: quit"))
+	if upgradeableCount > 1 {
+		// Show "Upgrade All" as the last selectable row.
+		allSelected := cursor == upgradeableCount
+		prefix := "  "
+		if allSelected {
+			prefix = styles.Cursor
+		}
+		b.WriteString(prefix + styles.HeadingStyle.Render("Upgrade All"))
+		b.WriteString("\n\n")
+		b.WriteString(styles.HelpStyle.Render("↑↓: select • enter: upgrade • esc: back • q: quit"))
 	} else {
-		b.WriteString(styles.HelpStyle.Render("esc: back • q: quit"))
+		// Single upgradeable tool — no need for "Upgrade All".
+		b.WriteString(styles.HeadingStyle.Render("Press enter to upgrade"))
+		b.WriteString("\n\n")
+		b.WriteString(styles.HelpStyle.Render("enter: upgrade • esc: back • q: quit"))
 	}
 
 	return b.String()

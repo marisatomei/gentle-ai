@@ -63,6 +63,31 @@ func TestRenderUpgrade_UpdatesAvailable(t *testing.T) {
 	}
 }
 
+// TestRenderUpgrade_MultiToolCursorNavigation verifies that when multiple tools
+// have updates, the screen shows a cursor indicator on the selected row and an
+// "Upgrade All" option as the last row.
+func TestRenderUpgrade_MultiToolCursorNavigation(t *testing.T) {
+	results := []update.UpdateResult{
+		{Tool: update.ToolInfo{Name: "engram"}, InstalledVersion: "1.0.0", LatestVersion: "2.0.0", Status: update.UpdateAvailable},
+		{Tool: update.ToolInfo{Name: "gga"}, InstalledVersion: "1.0.0", LatestVersion: "2.0.0", Status: update.UpdateAvailable},
+	}
+
+	// cursor=0 → engram row highlighted, "Upgrade All" present
+	out0 := RenderUpgrade(results, nil, nil, false, true, 0, 0)
+	if !strings.Contains(out0, "engram") || !strings.Contains(out0, "gga") {
+		t.Errorf("expected both tool names; got:\n%s", out0)
+	}
+	if !strings.Contains(strings.ToLower(out0), "upgrade all") {
+		t.Errorf("expected 'Upgrade All' row for multi-tool; got:\n%s", out0)
+	}
+
+	// cursor=2 (last item) → "Upgrade All" row highlighted
+	out2 := RenderUpgrade(results, nil, nil, false, true, 2, 0)
+	if !strings.Contains(strings.ToLower(out2), "upgrade all") {
+		t.Errorf("expected 'Upgrade All' row at cursor=2; got:\n%s", out2)
+	}
+}
+
 // TestRenderUpgrade_ResultState verifies that when an upgrade report is
 // available, the screen shows upgrade results.
 func TestRenderUpgrade_ResultState(t *testing.T) {

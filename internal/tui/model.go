@@ -981,10 +981,19 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenWelcome)
 			return m, nil
 		}
+		// Determine which tools to upgrade based on cursor position.
+		// cursor 0..N-1 → individual upgradeable tools; cursor N → "Upgrade All".
+		upgradeable := upgradeableResults(m.UpdateResults)
+		var toUpgrade []update.UpdateResult
+		if len(upgradeable) > 1 && m.Cursor < len(upgradeable) {
+			toUpgrade = []update.UpdateResult{upgradeable[m.Cursor]}
+		} else {
+			toUpgrade = m.UpdateResults
+		}
 		// Start upgrade.
 		m.OperationRunning = true
 		m.OperationMode = "upgrade"
-		return m, tea.Batch(tickCmd(), m.startUpgrade())
+		return m, tea.Batch(tickCmd(), m.startUpgradeWith(toUpgrade))
 	case ScreenSync:
 		// Guard: don't re-launch while running.
 		if m.OperationRunning {
@@ -1675,16 +1684,21 @@ func (m Model) withResetOperationState() Model {
 	return m
 }
 
-// startUpgrade launches the upgrade goroutine and returns a tea.Cmd.
+// startUpgrade launches the upgrade goroutine with all update results.
 func (m Model) startUpgrade() tea.Cmd {
+	return m.startUpgradeWith(m.UpdateResults)
+}
+
+// startUpgradeWith launches the upgrade goroutine with the provided results slice,
+// allowing callers to upgrade a subset of tools (e.g. a single tool).
+func (m Model) startUpgradeWith(results []update.UpdateResult) tea.Cmd {
 	upgradeFn := m.UpgradeFn
-	updateResults := m.UpdateResults
 	return func() tea.Msg {
 		if upgradeFn == nil {
 			return UpgradeDoneMsg{Err: fmt.Errorf("upgrade function not configured")}
 		}
 		ctx := context.Background()
-		report := upgradeFn(ctx, updateResults)
+		report := upgradeFn(ctx, results)
 		return UpgradeDoneMsg{Report: report}
 	}
 }
@@ -2054,7 +2068,11 @@ func (m Model) optionCount() int {
 		if !m.UpdateCheckDone {
 			return 0 // no options while checking
 		}
-		return 1 // "upgrade all" or "return" when up to date
+		n := upgradeableCount(m.UpdateResults)
+		if n <= 1 {
+			return 1 // single tool or nothing: just one action row
+		}
+		return n + 1 // individual tools + "Upgrade All"
 	case ScreenSync:
 		return 1
 	case ScreenUpgradeSync:
@@ -2799,4 +2817,20 @@ func agentBuilderSystemPromptPath(agentID model.AgentID) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// upgradeableResults returns the subset of results with UpdateAvailable status.
+func upgradeableResults(results []update.UpdateResult) []update.UpdateResult {
+	var out []update.UpdateResult
+	for _, r := range results {
+		if r.Status == update.UpdateAvailable {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// upgradeableCount returns the number of results with UpdateAvailable status.
+func upgradeableCount(results []update.UpdateResult) int {
+	return len(upgradeableResults(results))
 }
