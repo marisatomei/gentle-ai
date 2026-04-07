@@ -15,6 +15,11 @@ import (
 // Pinned backups do not count toward this limit and are never pruned.
 const DefaultRetentionCount = 5
 
+// DefaultBackupCooldown is the minimum time between consecutive backups.
+// If the most recent backup is younger than this, new backup steps are skipped
+// (both install/sync pipelines and the upgrade executor).
+const DefaultBackupCooldown = 30 * time.Minute
+
 // ComputeChecksum computes a composite SHA-256 checksum over the given file paths.
 //
 // Algorithm:

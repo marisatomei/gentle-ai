@@ -277,7 +277,7 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 			source:         backup.BackupSourceInstall,
 			description:    "pre-install snapshot",
 			appVersion:     AppVersion,
-			backupCooldown: DefaultBackupCooldown,
+			backupCooldown: backup.DefaultBackupCooldown,
 		},
 	}
 
@@ -303,11 +303,6 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 	return pipeline.StagePlan{Prepare: prepare, Apply: apply}
 }
 
-// DefaultBackupCooldown is the minimum time between backup snapshots.
-// If the most recent backup is younger than this, the backup step is skipped
-// immediately without reading any files — avoiding slow checksum computation
-// on repeat installs within a short window.
-const DefaultBackupCooldown = 30 * time.Minute
 
 type prepareBackupStep struct {
 	id          string

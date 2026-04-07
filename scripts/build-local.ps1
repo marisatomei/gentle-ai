@@ -11,7 +11,7 @@
     The script:
       1. Resolves a version string (argument, git tag, or fallback)
       2. Runs `go build` with that version injected via ldflags
-      3. Installs the binary to $InstallDir (default: %LOCALAPPDATA%\gentle-ai\bin)
+      3. Installs the binary to $InstallDir (auto-detected from PATH or Go bin dir)
       4. Verifies the installed binary reports the expected version
 
 .EXAMPLE
@@ -151,7 +151,17 @@ function Install-Binary {
     Write-Step "Installing binary"
 
     if (-not $Dir) {
-        $Dir = Join-Path $env:LOCALAPPDATA "gentle-ai\bin"
+        # Auto-detect: install alongside the currently active binary if it's on PATH
+        $existing = Get-Command $BINARY_NAME -ErrorAction SilentlyContinue
+        if ($existing) {
+            $Dir = Split-Path $existing.Source -Parent
+            Write-Info "Auto-detected install directory from PATH: $Dir"
+        } else {
+            # Fall back to Go bin directory (standard go install location)
+            $gobin = if ($env:GOBIN) { $env:GOBIN } elseif ($env:GOPATH) { Join-Path $env:GOPATH "bin" } else { Join-Path $env:USERPROFILE "go\bin" }
+            $Dir = $gobin
+            Write-Info "Binary not found on PATH; defaulting to Go bin: $Dir"
+        }
     }
 
     if (-not (Test-Path $Dir)) {

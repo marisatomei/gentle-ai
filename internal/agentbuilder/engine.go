@@ -31,6 +31,8 @@ func NewEngine(agentID model.AgentID) GenerationEngine {
 		return &GeminiEngine{}
 	case model.AgentCodex:
 		return &CodexEngine{}
+	case model.AgentCopilotCLI:
+		return &CopilotCLIEngine{}
 	default:
 		return nil
 	}
@@ -116,6 +118,27 @@ func (e *CodexEngine) Generate(ctx context.Context, prompt string) (string, erro
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("codex generate: %w\nstderr: %s", err, stderr.String())
+	}
+	return string(out), nil
+}
+
+// CopilotCLIEngine drives GitHub Copilot CLI via `copilot -p "{prompt}" --silent --allow-all-tools`.
+type CopilotCLIEngine struct{}
+
+func (e *CopilotCLIEngine) Agent() model.AgentID { return model.AgentCopilotCLI }
+
+func (e *CopilotCLIEngine) Available() bool {
+	_, err := exec.LookPath("copilot")
+	return err == nil
+}
+
+func (e *CopilotCLIEngine) Generate(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "copilot", "-p", prompt, "--silent", "--allow-all-tools")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("copilot generate: %w\nstderr: %s", err, stderr.String())
 	}
 	return string(out), nil
 }

@@ -239,26 +239,37 @@ func Execute(ctx context.Context, results []update.UpdateResult, profile system.
 	backupID := ""
 	backupWarning := ""
 	if !dryRun && len(executable) > 0 {
-		sp := NewSpinner(pw, "Creating pre-upgrade backup")
-		snapshotDir := filepath.Join(homeDir, ".gentle-ai", "backups",
-			fmt.Sprintf("upgrade-%s", time.Now().UTC().Format("20060102T150405Z")))
-		manifest, err := snapshotCreator(snapshotDir, configPathsForBackup(homeDir))
-		if err != nil {
-			sp.Finish(false)
-			backupWarning = fmt.Sprintf("pre-upgrade backup failed — upgrade will run without a backup: %s", err)
+		backupRoot := filepath.Join(homeDir, ".gentle-ai", "backups")
+		// Cooldown: skip backup if a recent one already exists (same logic as install/sync).
+		skipBackup := false
+		if age, err := backup.LatestBackupAge(backupRoot); err == nil && age > 0 && age < backup.DefaultBackupCooldown {
+			skipBackup = true
+		}
+		if skipBackup {
+			sp := NewSpinner(pw, "Creating pre-upgrade backup")
+			sp.FinishSkipped()
 		} else {
-			manifest.Source = backup.BackupSourceUpgrade
-			manifest.Description = "pre-upgrade snapshot"
-			manifest.CreatedByVersion = AppVersion
-			manifestPath := filepath.Join(snapshotDir, backup.ManifestFilename)
-			if wErr := backup.WriteManifest(manifestPath, manifest); wErr != nil {
-				log.Printf("backup: failed to write upgrade metadata to manifest: %v", wErr)
-				backupWarning = fmt.Sprintf("backup created but metadata update failed: %s", wErr)
-				sp.FinishSkipped()
+			sp := NewSpinner(pw, "Creating pre-upgrade backup")
+			snapshotDir := filepath.Join(backupRoot,
+				fmt.Sprintf("upgrade-%s", time.Now().UTC().Format("20060102T150405Z")))
+			manifest, err := snapshotCreator(snapshotDir, configPathsForBackup(homeDir))
+			if err != nil {
+				sp.Finish(false)
+				backupWarning = fmt.Sprintf("pre-upgrade backup failed — upgrade will run without a backup: %s", err)
 			} else {
-				sp.Finish(true)
+				manifest.Source = backup.BackupSourceUpgrade
+				manifest.Description = "pre-upgrade snapshot"
+				manifest.CreatedByVersion = AppVersion
+				manifestPath := filepath.Join(snapshotDir, backup.ManifestFilename)
+				if wErr := backup.WriteManifest(manifestPath, manifest); wErr != nil {
+					log.Printf("backup: failed to write upgrade metadata to manifest: %v", wErr)
+					backupWarning = fmt.Sprintf("backup created but metadata update failed: %s", wErr)
+					sp.FinishSkipped()
+				} else {
+					sp.Finish(true)
+				}
+				backupID = manifest.ID
 			}
-			backupID = manifest.ID
 		}
 	}
 

@@ -2685,6 +2685,7 @@ func (m Model) detectAgentBuilderEngines() []model.AgentID {
 		model.AgentOpenCode,
 		model.AgentGeminiCLI,
 		model.AgentCodex,
+		model.AgentCopilotCLI,
 	}
 	var available []model.AgentID
 	for _, id := range candidateIDs {
@@ -2779,6 +2780,8 @@ func agentBuilderSkillsDir(agentID model.AgentID) (string, bool) {
 		return filepath.Join(home, ".gemini", "skills"), true
 	case model.AgentCodex:
 		return filepath.Join(home, ".codex", "skills"), true
+	case model.AgentCopilotCLI:
+		return filepath.Join(home, ".copilot", "skills"), true
 	default:
 		return "", false
 	}
@@ -2952,6 +2955,8 @@ func agentBuilderSystemPromptPath(agentID model.AgentID) (string, bool) {
 		return filepath.Join(home, ".gemini", "GEMINI.md"), true
 	case model.AgentCodex:
 		return filepath.Join(home, ".codex", "AGENTS.md"), true
+	case model.AgentCopilotCLI:
+		return filepath.Join(home, ".copilot", "copilot-instructions.md"), true
 	default:
 		return "", false
 	}

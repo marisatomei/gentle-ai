@@ -371,7 +371,7 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 			source:         backup.BackupSourceSync,
 			description:    "pre-sync snapshot",
 			appVersion:     AppVersion,
-			backupCooldown: DefaultBackupCooldown,
+			backupCooldown: backup.DefaultBackupCooldown,
 		},
 	}
 
