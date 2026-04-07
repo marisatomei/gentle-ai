@@ -20,7 +20,7 @@ const (
 
 var copilotPresetDescriptions = map[CopilotModelPreset]string{
 	CopilotPresetDefault:     "Inherit the model from your active Copilot CLI session",
-	CopilotPresetPerformance: "Maximum quality: claude-opus-4.5 for all phases",
+	CopilotPresetPerformance: "Maximum quality: claude-opus-4.6 for all phases",
 	CopilotPresetEconomy:     "Cost-optimised: haiku for most phases, sonnet for spec & verify",
 	CopilotPresetCustom:      "Pick the model for each SDD phase individually",
 }
@@ -45,22 +45,15 @@ var copilotPhaseLabels = map[string]string{
 	"sdd-archive": "Archive",
 }
 
-// copilotModelCycleOrder defines the cycling order when pressing Enter on a phase row.
-var copilotModelCycleOrder = []model.CopilotModelID{
-	model.CopilotModelDefault,
-	model.CopilotModelSonnet45,
-	model.CopilotModelOpus45,
-	model.CopilotModelHaiku45,
-	model.CopilotModelSonnet46,
-	model.CopilotModelGPT41,
-	model.CopilotModelGPT41Mini,
-}
-
 // CopilotModelPickerState holds navigation state for the Copilot CLI model picker screen.
 type CopilotModelPickerState struct {
 	Preset            CopilotModelPreset
 	CustomAssignments map[string]model.CopilotModelID
 	InCustomMode      bool
+	// Phase picker sub-mode: selecting a model for a single phase from a scrollable list.
+	PhasePickerMode   bool
+	PhasePickerPhase  string // which phase is being configured
+	PhasePickerReturn int    // cursor position to restore in the phase list on exit
 }
 
 // NewCopilotModelPickerState returns the initial picker state: default preset selected.
@@ -72,13 +65,26 @@ func NewCopilotModelPickerState() CopilotModelPickerState {
 	}
 }
 
+// CopilotModelIndexFor returns the index of id in CopilotAllModels, or 0 (inherit) if not found.
+func CopilotModelIndexFor(id model.CopilotModelID) int {
+	for i, entry := range model.CopilotAllModels() {
+		if entry.ID == id {
+			return i
+		}
+	}
+	return 0
+}
+
 // HandleCopilotModelPickerNav processes a key press on the Copilot model picker screen.
 // Returns (handled bool, assignments map) — assignments non-nil means the user confirmed.
 func HandleCopilotModelPickerNav(key string, state *CopilotModelPickerState, cursor int) (bool, map[string]model.CopilotModelID) {
-	if !state.InCustomMode {
-		return handleCopilotPresetNav(key, state, cursor)
+	if state.PhasePickerMode {
+		return handleCopilotPhasePickerNav(key, state, cursor)
 	}
-	return handleCopilotCustomNav(key, state, cursor)
+	if state.InCustomMode {
+		return handleCopilotCustomNav(key, state, cursor)
+	}
+	return handleCopilotPresetNav(key, state, cursor)
 }
 
 func handleCopilotPresetNav(key string, state *CopilotModelPickerState, cursor int) (bool, map[string]model.CopilotModelID) {
@@ -123,9 +129,11 @@ func handleCopilotCustomNav(key string, state *CopilotModelPickerState, cursor i
 		return true, nil
 	case "enter":
 		if cursor < len(phases) {
+			// Enter phase picker sub-mode for the selected phase.
 			phase := phases[cursor]
-			current := state.CustomAssignments[phase]
-			state.CustomAssignments[phase] = nextCopilotModel(current)
+			state.PhasePickerPhase = phase
+			state.PhasePickerReturn = cursor
+			state.PhasePickerMode = true
 			return true, nil
 		}
 		if cursor == len(phases) { // "Confirm"
@@ -138,17 +146,30 @@ func handleCopilotCustomNav(key string, state *CopilotModelPickerState, cursor i
 	return false, nil
 }
 
-func nextCopilotModel(current model.CopilotModelID) model.CopilotModelID {
-	for i, m := range copilotModelCycleOrder {
-		if m == current {
-			return copilotModelCycleOrder[(i+1)%len(copilotModelCycleOrder)]
+func handleCopilotPhasePickerNav(key string, state *CopilotModelPickerState, cursor int) (bool, map[string]model.CopilotModelID) {
+	allModels := model.CopilotAllModels()
+	switch key {
+	case "esc":
+		state.PhasePickerMode = false
+		return true, nil
+	case "enter":
+		if cursor < len(allModels) {
+			state.CustomAssignments[state.PhasePickerPhase] = allModels[cursor].ID
+			state.PhasePickerMode = false
+			return true, nil
 		}
+		// "← Back" row
+		state.PhasePickerMode = false
+		return true, nil
 	}
-	return model.CopilotModelSonnet45
+	return false, nil
 }
 
 // RenderCopilotModelPicker renders the Copilot CLI model picker screen.
 func RenderCopilotModelPicker(state CopilotModelPickerState, cursor int) string {
+	if state.PhasePickerMode {
+		return renderCopilotPhaseModelPicker(state, cursor)
+	}
 	if state.InCustomMode {
 		return renderCopilotCustomPhaseList(state, cursor)
 	}
@@ -183,7 +204,7 @@ func renderCopilotCustomPhaseList(state CopilotModelPickerState, cursor int) str
 
 	b.WriteString(styles.TitleStyle.Render("Copilot CLI Custom Model Assignments"))
 	b.WriteString("\n\n")
-	b.WriteString(styles.SubtextStyle.Render("Press enter on a phase to cycle through available models"))
+	b.WriteString(styles.SubtextStyle.Render("Select a phase and press enter to choose its model"))
 	b.WriteString("\n\n")
 
 	phases := model.CopilotPhases()
@@ -203,32 +224,78 @@ func renderCopilotCustomPhaseList(state CopilotModelPickerState, cursor int) str
 	actionCursor := cursor - len(phases)
 	b.WriteString(renderOptions([]string{"Confirm", "← Back"}, actionCursor))
 	b.WriteString("\n")
-	b.WriteString(styles.HelpStyle.Render("j/k: navigate • enter: cycle model / confirm • esc: back to presets"))
+	b.WriteString(styles.HelpStyle.Render("j/k: navigate • enter: pick model / confirm • esc: back to presets"))
+
+	return b.String()
+}
+
+func renderCopilotPhaseModelPicker(state CopilotModelPickerState, cursor int) string {
+	var b strings.Builder
+
+	phaseLabel := copilotPhaseLabels[state.PhasePickerPhase]
+	b.WriteString(styles.TitleStyle.Render(fmt.Sprintf("Model for %s phase", phaseLabel)))
+	b.WriteString("\n\n")
+	b.WriteString(styles.SubtextStyle.Render("Choose a Copilot model for this phase:"))
+	b.WriteString("\n\n")
+
+	allModels := model.CopilotAllModels()
+	current := state.CustomAssignments[state.PhasePickerPhase]
+
+	for idx, entry := range allModels {
+		focused := idx == cursor
+		isSelected := entry.ID == current
+
+		catTag := styles.SubtextStyle.Render(fmt.Sprintf("[%s]", entry.Category))
+		label := fmt.Sprintf("%-28s %s", entry.Label, catTag)
+
+		var marker string
+		if isSelected {
+			marker = "◉ "
+		} else {
+			marker = "○ "
+		}
+
+		if focused {
+			b.WriteString(styles.SelectedStyle.Render(styles.Cursor+marker+label) + "\n")
+		} else {
+			b.WriteString(styles.UnselectedStyle.Render("  "+marker+label) + "\n")
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(renderOptions([]string{"← Back"}, cursor-len(allModels)))
+	b.WriteString("\n")
+	b.WriteString(styles.HelpStyle.Render("j/k: navigate • enter: select • esc: cancel"))
 
 	return b.String()
 }
 
 func copilotModelTag(m model.CopilotModelID) string {
-	switch m {
-	case model.CopilotModelOpus45:
-		return styles.WarningStyle.Render("[opus-4.5]")
-	case model.CopilotModelHaiku45:
-		return styles.SubtextStyle.Render("[haiku-4.5]")
-	case model.CopilotModelSonnet46:
-		return styles.SuccessStyle.Render("[sonnet-4.6]")
-	case model.CopilotModelGPT41:
-		return styles.HeadingStyle.Render("[gpt-4.1]")
-	case model.CopilotModelGPT41Mini:
-		return styles.SubtextStyle.Render("[gpt-4.1-mini]")
-	case model.CopilotModelSonnet45:
-		return styles.SuccessStyle.Render("[sonnet-4.5]")
-	default: // CopilotModelDefault ("") or any unrecognised value
+	entry := model.CopilotAllModels()
+	for _, e := range entry {
+		if e.ID == m {
+			switch e.Category {
+			case "Claude":
+				return styles.SuccessStyle.Render(fmt.Sprintf("[%s]", e.Label))
+			case "GPT":
+				return styles.HeadingStyle.Render(fmt.Sprintf("[%s]", e.Label))
+			default:
+				return styles.SubtextStyle.Render("[inherit]")
+			}
+		}
+	}
+	if m == model.CopilotModelDefault {
 		return styles.SubtextStyle.Render("[inherit]")
 	}
+	// Unknown model ID — show it as-is
+	return styles.SubtextStyle.Render(fmt.Sprintf("[%s]", string(m)))
 }
 
 // CopilotModelPickerOptionCount returns the number of navigable options for the screen.
 func CopilotModelPickerOptionCount(state CopilotModelPickerState) int {
+	if state.PhasePickerMode {
+		return len(model.CopilotAllModels()) + 1 // models + Back
+	}
 	if state.InCustomMode {
 		return len(model.CopilotPhases()) + 2 // phases + Confirm + Back
 	}

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls:*)",
+      "Bash(head -50 ./internal/backup/*.go)",
+      "Bash(xargs wc:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.github.com)",
+      "Bash(go build:*)",
+      "Bash(cmd.exe /c \"where go\" 2>/dev/null)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/Go/bin:/c/Users/Marce/go/bin:$HOME/go/bin\")",
+      "Bash(go version:*)",
+      "Bash(go test:*)",
+      "Bash(git stash:*)"
+    ]
+  }
+}

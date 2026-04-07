@@ -117,14 +117,54 @@ const (
 type CopilotModelID string
 
 const (
-	CopilotModelDefault   CopilotModelID = ""
-	CopilotModelSonnet45  CopilotModelID = "claude-sonnet-4.5"
-	CopilotModelOpus45    CopilotModelID = "claude-opus-4.5"
-	CopilotModelHaiku45   CopilotModelID = "claude-haiku-4.5"
-	CopilotModelSonnet46  CopilotModelID = "claude-sonnet-4.6"
-	CopilotModelGPT41     CopilotModelID = "gpt-4.1"
-	CopilotModelGPT41Mini CopilotModelID = "gpt-4.1-mini"
+	CopilotModelDefault    CopilotModelID = ""
+	CopilotModelOpus46     CopilotModelID = "claude-opus-4.6"
+	CopilotModelOpus45     CopilotModelID = "claude-opus-4.5"
+	CopilotModelSonnet46   CopilotModelID = "claude-sonnet-4.6"
+	CopilotModelSonnet45   CopilotModelID = "claude-sonnet-4.5"
+	CopilotModelSonnet4    CopilotModelID = "claude-sonnet-4"
+	CopilotModelHaiku45    CopilotModelID = "claude-haiku-4.5"
+	CopilotModelGPT54      CopilotModelID = "gpt-5.4"
+	CopilotModelGPT53Codex CopilotModelID = "gpt-5.3-codex"
+	CopilotModelGPT52Codex CopilotModelID = "gpt-5.2-codex"
+	CopilotModelGPT52      CopilotModelID = "gpt-5.2"
+	CopilotModelGPT51      CopilotModelID = "gpt-5.1"
+	CopilotModelGPT54Mini  CopilotModelID = "gpt-5.4-mini"
+	CopilotModelGPT5Mini   CopilotModelID = "gpt-5-mini"
+	CopilotModelGPT41      CopilotModelID = "gpt-4.1"
+	CopilotModelGPT41Mini  CopilotModelID = "gpt-4.1-mini"
 )
+
+// CopilotModelEntry describes a single model available in Copilot CLI.
+type CopilotModelEntry struct {
+	ID       CopilotModelID
+	Label    string // model ID as displayed; "(inherit from session)" for empty ID
+	Category string // "Claude", "GPT", or "—" for inherit
+}
+
+var copilotAllModels = []CopilotModelEntry{
+	{CopilotModelDefault, "(inherit from session)", "—"},
+	{CopilotModelOpus46, "claude-opus-4.6", "Claude"},
+	{CopilotModelOpus45, "claude-opus-4.5", "Claude"},
+	{CopilotModelSonnet46, "claude-sonnet-4.6", "Claude"},
+	{CopilotModelSonnet45, "claude-sonnet-4.5", "Claude"},
+	{CopilotModelSonnet4, "claude-sonnet-4", "Claude"},
+	{CopilotModelHaiku45, "claude-haiku-4.5", "Claude"},
+	{CopilotModelGPT54, "gpt-5.4", "GPT"},
+	{CopilotModelGPT53Codex, "gpt-5.3-codex", "GPT"},
+	{CopilotModelGPT52Codex, "gpt-5.2-codex", "GPT"},
+	{CopilotModelGPT52, "gpt-5.2", "GPT"},
+	{CopilotModelGPT51, "gpt-5.1", "GPT"},
+	{CopilotModelGPT54Mini, "gpt-5.4-mini", "GPT"},
+	{CopilotModelGPT5Mini, "gpt-5-mini", "GPT"},
+	{CopilotModelGPT41, "gpt-4.1", "GPT"},
+	{CopilotModelGPT41Mini, "gpt-4.1-mini", "GPT"},
+}
+
+// CopilotAllModels returns the ordered list of all Copilot CLI models available for selection.
+func CopilotAllModels() []CopilotModelEntry {
+	return copilotAllModels
+}
 
 // copilotPhases is the ordered list of SDD phase keys for Copilot CLI.
 var copilotPhases = []string{
@@ -142,11 +182,11 @@ func CopilotModelPresetDefault() map[string]CopilotModelID {
 	return map[string]CopilotModelID{}
 }
 
-// CopilotModelPresetPerformance returns the performance preset (all claude-opus-4.5).
+// CopilotModelPresetPerformance returns the performance preset (all claude-opus-4.6).
 func CopilotModelPresetPerformance() map[string]CopilotModelID {
 	out := map[string]CopilotModelID{}
 	for _, p := range copilotPhases {
-		out[p] = CopilotModelOpus45
+		out[p] = CopilotModelOpus46
 	}
 	return out
 }
