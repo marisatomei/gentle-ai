@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // DefaultRetentionCount is the default number of unpinned backups to keep.
@@ -167,6 +168,36 @@ func Prune(backupDir string, retentionCount int) ([]string, error) {
 	}
 
 	return deleted, nil
+}
+
+// LatestBackupAge returns the time elapsed since the most recent backup in backupDir.
+// Returns (0, nil) when backupDir does not exist or contains no readable manifests.
+// The caller can use this to implement a cooldown:
+//
+//	age, err := backup.LatestBackupAge(backupRoot)
+//	if err == nil && age < cooldown {
+//	    return nil // skip backup
+//	}
+func LatestBackupAge(backupDir string) (time.Duration, error) {
+	manifests, err := listManifests(backupDir)
+	if err != nil {
+		return 0, err
+	}
+	if len(manifests) == 0 {
+		return 0, nil
+	}
+
+	latest := manifests[0]
+	for _, m := range manifests[1:] {
+		if m.CreatedAt.After(latest.CreatedAt) {
+			latest = m
+		}
+	}
+
+	if latest.CreatedAt.IsZero() {
+		return 0, nil
+	}
+	return time.Since(latest.CreatedAt), nil
 }
 
 // listManifests reads all backup directories inside backupDir and returns the

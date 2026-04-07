@@ -754,16 +754,17 @@ func (m Model) handleKeyPress(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.Screen == ScreenCopilotModelPicker {
-		wasInCustomMode := m.CopilotModelPicker.InCustomMode
 		wasInPhasePicker := m.CopilotModelPicker.PhasePickerMode
 		handled, updated := screens.HandleCopilotModelPickerNav(keyStr, &m.CopilotModelPicker, m.Cursor)
 		if handled {
-			if wasInCustomMode && !m.CopilotModelPicker.InCustomMode && !m.CopilotModelPicker.PhasePickerMode {
-				// Exited custom mode back to preset list.
-				m.Cursor = 0
-			} else if !wasInPhasePicker && m.CopilotModelPicker.PhasePickerMode {
+			if !wasInPhasePicker && m.CopilotModelPicker.PhasePickerMode {
 				// Entered phase picker — start cursor at the currently assigned model.
-				m.Cursor = screens.CopilotModelIndexFor(m.CopilotModelPicker.CustomAssignments[m.CopilotModelPicker.PhasePickerPhase])
+				var current model.CopilotModelID
+				phase := m.CopilotModelPicker.PhasePickerPhase
+				if phase != "" && phase != "__set_all__" {
+					current = m.CopilotModelPicker.Assignments[phase]
+				}
+				m.Cursor = screens.CopilotModelIndexFor(current)
 			} else if wasInPhasePicker && !m.CopilotModelPicker.PhasePickerMode {
 				// Exited phase picker — restore cursor to the phase row.
 				m.Cursor = m.CopilotModelPicker.PhasePickerReturn
@@ -1241,7 +1242,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case ScreenCopilotModelPicker:
-		if !m.CopilotModelPicker.InCustomMode && m.Cursor == screens.CopilotModelPickerOptionCount(m.CopilotModelPicker)-1 {
+		if !m.CopilotModelPicker.PhasePickerMode && m.Cursor == screens.CopilotModelPickerOptionCount(m.CopilotModelPicker)-1 {
 			if m.ModelConfigMode {
 				m.ModelConfigMode = false
 				m.setScreen(ScreenModelConfig)

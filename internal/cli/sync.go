@@ -362,15 +362,16 @@ func (r *syncRuntime) stagePlan() pipeline.StagePlan {
 
 	prepare := []pipeline.Step{
 		prepareBackupStep{
-			id:          "prepare:backup-snapshot",
-			snapshotter: backup.NewSnapshotter(),
-			snapshotDir: filepath.Join(r.backupRoot, time.Now().UTC().Format("20060102150405.000000000")),
-			targets:     targets,
-			state:       r.state,
-			backupRoot:  r.backupRoot,
-			source:      backup.BackupSourceSync,
-			description: "pre-sync snapshot",
-			appVersion:  AppVersion,
+			id:             "prepare:backup-snapshot",
+			snapshotter:    backup.NewSnapshotter(),
+			snapshotDir:    filepath.Join(r.backupRoot, time.Now().UTC().Format("20060102150405.000000000")),
+			targets:        targets,
+			state:          r.state,
+			backupRoot:     r.backupRoot,
+			source:         backup.BackupSourceSync,
+			description:    "pre-sync snapshot",
+			appVersion:     AppVersion,
+			backupCooldown: DefaultBackupCooldown,
 		},
 	}
 

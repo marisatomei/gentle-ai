@@ -268,15 +268,16 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 	prepare := []pipeline.Step{
 		checkDependenciesStep{id: "prepare:check-dependencies", profile: r.profile},
 		prepareBackupStep{
-			id:          "prepare:backup-snapshot",
-			snapshotter: backup.NewSnapshotter(),
-			snapshotDir: filepath.Join(r.backupRoot, time.Now().UTC().Format("20060102150405.000000000")),
-			targets:     targets,
-			state:       r.state,
-			backupRoot:  r.backupRoot,
-			source:      backup.BackupSourceInstall,
-			description: "pre-install snapshot",
-			appVersion:  AppVersion,
+			id:             "prepare:backup-snapshot",
+			snapshotter:    backup.NewSnapshotter(),
+			snapshotDir:    filepath.Join(r.backupRoot, time.Now().UTC().Format("20060102150405.000000000")),
+			targets:        targets,
+			state:          r.state,
+			backupRoot:     r.backupRoot,
+			source:         backup.BackupSourceInstall,
+			description:    "pre-install snapshot",
+			appVersion:     AppVersion,
+			backupCooldown: DefaultBackupCooldown,
 		},
 	}
 
@@ -302,6 +303,12 @@ func (r *installRuntime) stagePlan() pipeline.StagePlan {
 	return pipeline.StagePlan{Prepare: prepare, Apply: apply}
 }
 
+// DefaultBackupCooldown is the minimum time between backup snapshots.
+// If the most recent backup is younger than this, the backup step is skipped
+// immediately without reading any files — avoiding slow checksum computation
+// on repeat installs within a short window.
+const DefaultBackupCooldown = 30 * time.Minute
+
 type prepareBackupStep struct {
 	id          string
 	snapshotter backup.Snapshotter
@@ -322,6 +329,11 @@ type prepareBackupStep struct {
 	// appVersion is the gentle-ai version that created this backup.
 	// When set, it is written into the manifest as CreatedByVersion.
 	appVersion string
+
+	// backupCooldown, when > 0, skips the backup entirely if the most recent
+	// backup was created within this duration. This avoids slow checksum computation
+	// on repeat installs within a short window.
+	backupCooldown time.Duration
 }
 
 func (s prepareBackupStep) ID() string {
@@ -329,6 +341,15 @@ func (s prepareBackupStep) ID() string {
 }
 
 func (s prepareBackupStep) Run() error {
+	// Cooldown: skip backup entirely if the most recent backup is young enough.
+	// This is a fast check (1 ReadDir + 1 JSON parse) that avoids reading all
+	// target files to compute checksums on repeat installs.
+	if s.backupRoot != "" && s.backupCooldown > 0 {
+		if age, err := backup.LatestBackupAge(s.backupRoot); err == nil && age > 0 && age < s.backupCooldown {
+			return nil
+		}
+	}
+
 	// Deduplication: skip snapshot creation when content is identical to the
 	// most recent backup. Only active when backupRoot is set.
 	if s.backupRoot != "" {
