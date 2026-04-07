@@ -35,7 +35,52 @@ var readCurrentAssignmentsFn = func(settingsPath string) (map[string]model.Model
 	return sdd.ReadCurrentModelAssignments(settingsPath)
 }
 
-// readProfilesFn is a package-level variable so tests can override how profiles
+// readCurrentCopilotAssignmentsFn reads the installed model: field from each
+// Copilot CLI .agent.md file in agentsDir and returns phase → model-ID.
+// Package-level var for testability.
+var readCurrentCopilotAssignmentsFn = func(agentsDir string) (map[string]model.CopilotModelID, error) {
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]model.CopilotModelID{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".agent.md") {
+			continue
+		}
+		phase := strings.TrimSuffix(entry.Name(), ".agent.md")
+		data, err := os.ReadFile(filepath.Join(agentsDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if id := parseCopilotModelFromFrontmatter(string(data)); id != "" {
+			result[phase] = model.CopilotModelID(id)
+		}
+	}
+	return result, nil
+}
+
+// parseCopilotModelFromFrontmatter extracts the "model:" value from a YAML
+// frontmatter block (between the opening and closing "---" lines).
+func parseCopilotModelFromFrontmatter(content string) string {
+	if !strings.HasPrefix(content, "---") {
+		return ""
+	}
+	rest := content[3:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return ""
+	}
+	for _, line := range strings.Split(rest[:end], "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "model:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "model:"))
+		}
+	}
+	return ""
+}
+
+
 // are detected from opencode.json. It wraps sdd.DetectProfiles and is called
 // on ScreenProfiles entry and after SyncDoneMsg to refresh the profile list.
 var readProfilesFn = func(settingsPath string) ([]model.Profile, error) {
@@ -1167,7 +1212,19 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenModelPicker)
 		case 2: // Configure Copilot CLI models
 			m.ModelConfigMode = true
+			// Pre-populate from in-session assignments, or read from installed agent files.
+			// Only reads from disk when no in-session override exists yet, so changes
+			// made earlier this session are not overwritten.
+			if m.Selection.CopilotModelAssignments == nil {
+				agentsDir := filepath.Join(homeDir(), ".copilot", "agents")
+				if current, err := readCurrentCopilotAssignmentsFn(agentsDir); err == nil && len(current) > 0 {
+					m.Selection.CopilotModelAssignments = current
+				}
+			}
 			m.CopilotModelPicker = screens.NewCopilotModelPickerState()
+			for phase, id := range m.Selection.CopilotModelAssignments {
+				m.CopilotModelPicker.Assignments[phase] = id
+			}
 			m.setScreen(ScreenCopilotModelPicker)
 		default: // Back
 			m.setScreen(ScreenWelcome)
