@@ -502,7 +502,7 @@ func (s componentSyncStep) Run() error {
 			if err != nil {
 				return fmt.Errorf("sync sdd for %q: %w", adapter.Agent(), err)
 			}
-			s.countChanged(boolToInt(res.Changed))
+			s.countChanged(len(res.Files))
 		}
 		return nil
 
