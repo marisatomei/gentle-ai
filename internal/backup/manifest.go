@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -58,6 +59,18 @@ type Manifest struct {
 	// CreatedByVersion is the gentle-ai version that created this backup.
 	// Optional: omitted when empty for backward-compatibility with old manifests.
 	CreatedByVersion string `json:"created_by_version,omitempty"`
+
+	// Pinned marks the backup as protected from retention pruning.
+	// Optional: omitted when false for backward-compatibility with old manifests.
+	Pinned bool `json:"pinned,omitempty"`
+
+	// Compressed indicates the backup files are stored as a tar.gz archive.
+	// Optional: omitted when false for backward-compatibility with old manifests.
+	Compressed bool `json:"compressed,omitempty"`
+
+	// Checksum is the SHA-256 composite hash of the snapshotted files, used for deduplication.
+	// Optional: omitted when empty for backward-compatibility with old manifests.
+	Checksum string `json:"checksum,omitempty"`
 }
 
 // DisplayLabel returns a human-readable label for the backup suitable for display
@@ -69,7 +82,10 @@ type Manifest struct {
 func (m Manifest) DisplayLabel() string {
 	base := fmt.Sprintf("%s — %s", m.Source.Label(), m.CreatedAt.Local().Format("2006-01-02 15:04"))
 	if m.FileCount > 0 {
-		return fmt.Sprintf("%s (%d files)", base, m.FileCount)
+		base = fmt.Sprintf("%s (%d files)", base, m.FileCount)
+	}
+	if m.Pinned {
+		return "[pinned] " + base
 	}
 	return base
 }
@@ -113,10 +129,61 @@ func ReadManifest(path string) (Manifest, error) {
 	return manifest, nil
 }
 
+// backupRoot returns the expected parent directory for all backups.
+func backupRoot() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".gentle-ai", "backups"), nil
+}
+
+// BackupRootFn is the function used to resolve the backup root directory.
+// Package-level var for testability — swapped in tests to use a temp directory.
+// Exported so tests in other packages (e.g. internal/update/upgrade) can override it.
+var BackupRootFn = backupRoot
+
+// isRootDirUnderBackupRoot validates that dir is a direct or indirect subdirectory
+// of the expected backup root (~/.gentle-ai/backups/). This prevents a tampered
+// manifest with root_dir set to "/" or another sensitive path from deleting arbitrary files.
+//
+// Symlink note: if the path already exists on disk, EvalSymlinks is used to
+// resolve the real path and re-check against the backup root, preventing symlink escapes.
+// If the path does not exist yet, only filepath.Clean is used — this limitation is accepted
+// and documented here, consistent with isPathUnderHome.
+func isRootDirUnderBackupRoot(dir string) (bool, error) {
+	root, err := BackupRootFn()
+	if err != nil {
+		return false, err
+	}
+	clean := filepath.Clean(dir)
+	rootClean := filepath.Clean(root)
+	if !strings.HasPrefix(clean, rootClean+string(filepath.Separator)) {
+		return false, nil
+	}
+	// If the path exists, resolve symlinks and re-check to prevent symlink escapes.
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		resolvedRoot, err := filepath.EvalSymlinks(rootClean)
+		if err != nil {
+			resolvedRoot = rootClean
+		}
+		return strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)), nil
+	}
+	// Path does not exist yet — accept Clean-only check.
+	return true, nil
+}
+
 // DeleteBackup removes the entire backup directory.
 func DeleteBackup(manifest Manifest) error {
 	if manifest.RootDir == "" {
 		return fmt.Errorf("backup has no root directory")
+	}
+	ok, err := isRootDirUnderBackupRoot(manifest.RootDir)
+	if err != nil {
+		return fmt.Errorf("validate backup root dir: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("backup RootDir %q is outside the expected backup directory — refusing to delete", manifest.RootDir)
 	}
 	return os.RemoveAll(manifest.RootDir)
 }
@@ -128,6 +195,18 @@ func RenameBackup(manifest Manifest, newDescription string) error {
 		return fmt.Errorf("backup has no root directory")
 	}
 	manifest.Description = newDescription
+	manifestPath := filepath.Join(manifest.RootDir, ManifestFilename)
+	return WriteManifest(manifestPath, manifest)
+}
+
+// TogglePin flips the Pinned field of the manifest and rewrites the manifest.json
+// file inside the backup's RootDir. Pinned backups are excluded from retention
+// pruning. Returns an error if RootDir is empty or the write fails.
+func TogglePin(manifest Manifest) error {
+	if manifest.RootDir == "" {
+		return fmt.Errorf("backup has no root directory")
+	}
+	manifest.Pinned = !manifest.Pinned
 	manifestPath := filepath.Join(manifest.RootDir, ManifestFilename)
 	return WriteManifest(manifestPath, manifest)
 }

@@ -109,8 +109,8 @@ func TestOpenCodeEmbeddedAssetLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir(opencode/commands) error = %v", err)
 	}
-	if len(commandEntries) != 8 {
-		t.Fatalf("opencode commands count = %d, want 8", len(commandEntries))
+	if len(commandEntries) != 9 {
+		t.Fatalf("opencode commands count = %d, want 9", len(commandEntries))
 	}
 
 	pluginEntries, err := FS.ReadDir("opencode/plugins")
@@ -154,9 +154,9 @@ func TestEmbeddedAssetCount(t *testing.T) {
 		}
 	}
 
-	// We expect 16 skill directories (9 SDD + judgment-day + 5 foundation + _shared).
-	if skillDirs != 16 {
-		t.Fatalf("expected 16 skill directories, got %d", skillDirs)
+	// We expect 17 skill directories (10 SDD + judgment-day + 5 foundation + _shared).
+	if skillDirs != 17 {
+		t.Fatalf("expected 17 skill directories, got %d", skillDirs)
 	}
 
 	// Verify each skill directory has a SKILL.md.
@@ -224,15 +224,30 @@ func TestOpenCodeSDDOverlaySubagentsAreExplicitExecutors(t *testing.T) {
 				t.Fatalf("%q missing agent map", assetPath)
 			}
 
+			// multi overlay uses __PROMPT_FILE_{phase}__ placeholders that are
+			// replaced at runtime with absolute {file:...} references by
+			// inlineOpenCodeSDDPrompts. Verify the placeholder format.
+			// single overlay still uses inline prompt strings.
+			isMulti := assetPath == "opencode/sdd-overlay-multi.json"
+
 			for _, phase := range []string{"sdd-init", "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive"} {
 				agentDef, ok := agents[phase].(map[string]any)
 				if !ok {
 					t.Fatalf("%q missing %s agent", assetPath, phase)
 				}
 				prompt, _ := agentDef["prompt"].(string)
-				for _, want := range []string{"not the orchestrator", "Do NOT delegate", "Do NOT call task/delegate", "Do NOT launch sub-agents"} {
-					if !strings.Contains(prompt, want) {
-						t.Fatalf("%q phase %s prompt missing %q", assetPath, phase, want)
+				if isMulti {
+					// Multi overlay uses placeholders — verify the placeholder exists.
+					expectedPlaceholder := "__PROMPT_FILE_" + phase + "__"
+					if prompt != expectedPlaceholder {
+						t.Fatalf("%q phase %s prompt = %q, want placeholder %q", assetPath, phase, prompt, expectedPlaceholder)
+					}
+				} else {
+					// Single overlay has inline executor-scoped prompts.
+					for _, want := range []string{"not the orchestrator", "Do NOT delegate", "Do NOT call task/delegate", "Do NOT launch sub-agents"} {
+						if !strings.Contains(prompt, want) {
+							t.Fatalf("%q phase %s prompt missing %q", assetPath, phase, want)
+						}
 					}
 				}
 			}

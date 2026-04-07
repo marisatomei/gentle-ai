@@ -13,6 +13,7 @@ var sddSkills = []model.SkillID{
 	model.SkillSDDApply,
 	model.SkillSDDVerify,
 	model.SkillSDDArchive,
+	model.SkillSDDOnboard,
 	model.SkillJudgmentDay,
 }
 
@@ -22,6 +23,7 @@ var foundationSkills = []model.SkillID{
 	model.SkillCreator,
 	model.SkillBranchPR,
 	model.SkillIssueCreation,
+	model.SkillSkillRegistry,
 }
 
 // SkillsForPreset returns which skills should be installed for a given preset.

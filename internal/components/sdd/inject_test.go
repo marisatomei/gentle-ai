@@ -602,6 +602,60 @@ func TestInjectFileAppendRemovesLegacyBlockWhenMarkedSectionAlreadyExists(t *tes
 	}
 }
 
+func TestInjectMarkdownSections_stripsLegacyATLBlockWithMarkedSection(t *testing.T) {
+	home := t.TempDir()
+
+	claudeAdpt := claudeAdapter()
+	promptPath := claudeAdpt.SystemPromptFile(home)
+	if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	const legacyATLBlock = `<!-- BEGIN:agent-teams-lite -->
+## Agent Teams Orchestrator
+
+You are a COORDINATOR, not an executor.
+
+### Delegation Rules (ALWAYS ACTIVE)
+
+| Rule | Instruction |
+|------|------------|
+| No inline work | Reading/writing code → delegate to sub-agent |
+<!-- END:agent-teams-lite -->`
+
+	sddSection := "<!-- gentle-ai:sdd-orchestrator -->\nYou are a COORDINATOR.\n<!-- /gentle-ai:sdd-orchestrator -->\n"
+	existing := legacyATLBlock + "\n\n" + sddSection
+
+	if err := os.WriteFile(promptPath, []byte(existing), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, injectErr := Inject(home, claudeAdpt, "")
+	if injectErr != nil {
+		t.Fatalf("Inject() error = %v", injectErr)
+	}
+
+	content, readErr := os.ReadFile(promptPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+
+	text := string(content)
+
+	if strings.Contains(text, "<!-- BEGIN:agent-teams-lite -->") {
+		t.Fatal("ATL open marker should have been stripped during inject")
+	}
+	if strings.Contains(text, "<!-- END:agent-teams-lite -->") {
+		t.Fatal("ATL close marker should have been stripped during inject")
+	}
+	if !strings.Contains(text, "<!-- gentle-ai:sdd-orchestrator -->") {
+		t.Fatal("sdd-orchestrator section must be present after ATL strip")
+	}
+	if !strings.Contains(text, "<!-- /gentle-ai:sdd-orchestrator -->") {
+		t.Fatal("sdd-orchestrator close marker must be present after ATL strip")
+	}
+}
+
 func TestInjectOpenCodeMultiMode(t *testing.T) {
 	home := t.TempDir()
 
@@ -634,9 +688,9 @@ func TestInjectOpenCodeMultiMode(t *testing.T) {
 		t.Fatalf("agent key has unexpected type: %T", agentRaw)
 	}
 
-	// Multi overlay must contain orchestrator + 9 sub-agents = 10 agents.
-	if len(agentMap) != 10 {
-		t.Fatalf("agent count = %d, want 10", len(agentMap))
+	// Multi overlay must contain orchestrator + 10 sub-agents = 11 agents.
+	if len(agentMap) != 11 {
+		t.Fatalf("agent count = %d, want 11", len(agentMap))
 	}
 
 	// Verify orchestrator is present.
@@ -749,6 +803,8 @@ func TestInjectOpenCodeSubagentPromptsStayExecutorScoped(t *testing.T) {
 		t.Fatal("opencode.json missing agent map")
 	}
 
+	promptDir := SharedPromptDir(home)
+
 	for _, phase := range []string{"sdd-init", "sdd-explore", "sdd-propose", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive"} {
 		raw, ok := agentMap[phase]
 		if !ok {
@@ -758,10 +814,25 @@ func TestInjectOpenCodeSubagentPromptsStayExecutorScoped(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s has unexpected type: %T", phase, raw)
 		}
+
+		// After the shared-prompt-files refactor, the prompt field is a {file:...}
+		// reference. The executor-scoped content lives in the prompt file on disk.
 		prompt, _ := agentDef["prompt"].(string)
+		expectedRef := "{file:" + filepath.Join(promptDir, phase+".md") + "}"
+		if prompt != expectedRef {
+			t.Fatalf("%s prompt = %q, want {file:...} reference %q", phase, prompt, expectedRef)
+		}
+
+		// Also verify the prompt file itself contains the executor-scoped markers.
+		promptFilePath := filepath.Join(promptDir, phase+".md")
+		promptFileData, readErr := os.ReadFile(promptFilePath)
+		if readErr != nil {
+			t.Fatalf("%s prompt file %q not readable: %v", phase, promptFilePath, readErr)
+		}
+		promptFileContent := string(promptFileData)
 		for _, want := range []string{"not the orchestrator", "Do NOT delegate", "Do NOT call task/delegate", "Do NOT launch sub-agents"} {
-			if !strings.Contains(prompt, want) {
-				t.Fatalf("%s prompt missing %q", phase, want)
+			if !strings.Contains(promptFileContent, want) {
+				t.Fatalf("%s prompt file missing %q", phase, want)
 			}
 		}
 	}
@@ -799,12 +870,12 @@ func TestInjectOpenCodeEmptySDDModeDefaultsSingle(t *testing.T) {
 		t.Fatalf("agent key has unexpected type: %T", agentRaw)
 	}
 
-	// Empty mode defaults to single — orchestrator + 9 sub-agents = 10 agents.
+	// Empty mode defaults to single — orchestrator + 10 sub-agents = 11 agents.
 	if _, ok := agentMap["sdd-orchestrator"]; !ok {
 		t.Fatal("missing sdd-orchestrator agent")
 	}
-	if len(agentMap) != 10 {
-		t.Fatalf("agent count = %d, want 10", len(agentMap))
+	if len(agentMap) != 11 {
+		t.Fatalf("agent count = %d, want 11", len(agentMap))
 	}
 
 	// Verify orchestrator mode is "primary".
@@ -3229,5 +3300,86 @@ func TestInjectOpenCodePostCheckDiskFallback(t *testing.T) {
 	}
 	if !strings.Contains(string(diskContent), "sdd-orchestrator") {
 		t.Fatal("File on disk lost sdd-orchestrator after inject")
+	}
+}
+
+// TestInjectOpenCodeWithProfile_PostCheckVerifiesOrchestrator verifies that
+// when a named profile is injected, the post-check confirms sdd-orchestrator-{name}
+// is present in the merged opencode.json.
+func TestInjectOpenCodeWithProfile_PostCheckVerifiesOrchestrator(t *testing.T) {
+	home := t.TempDir()
+	mockNoPackageManager(t)
+
+	cheapProfile := model.Profile{
+		Name:              "cheap",
+		OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"},
+	}
+
+	result, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		Profiles: []model.Profile{cheapProfile},
+	})
+	if err != nil {
+		t.Fatalf("Inject() with profile error = %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("Inject() with profile changed = false")
+	}
+
+	// Verify sdd-orchestrator-cheap is present in the merged settings.
+	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	content, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(opencode.json) error = %v", err)
+	}
+	if !strings.Contains(string(content), `"sdd-orchestrator-cheap"`) {
+		t.Fatal("opencode.json missing sdd-orchestrator-cheap after profile injection")
+	}
+}
+
+// TestInjectOpenCodeWithProfile_DefaultProfileSkipped verifies that the default
+// profile (Name="" or Name="default") is skipped in the profile injection loop.
+func TestInjectOpenCodeWithProfile_DefaultProfileSkipped(t *testing.T) {
+	home := t.TempDir()
+	mockNoPackageManager(t)
+
+	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		Profiles: []model.Profile{
+			{Name: "", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"}},
+			{Name: "default", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Inject() with default profiles error = %v (should not fail)", err)
+	}
+}
+
+// TestInjectOpenCodeWithTwoProfiles_BothOrchestratorsPresent verifies that
+// two named profiles both get their orchestrators injected and verified.
+func TestInjectOpenCodeWithTwoProfiles_BothOrchestratorsPresent(t *testing.T) {
+	home := t.TempDir()
+	mockNoPackageManager(t)
+
+	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		Profiles: []model.Profile{
+			{Name: "cheap", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"}},
+			{Name: "premium", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-opus-4-5"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Inject() with two profiles error = %v", err)
+	}
+
+	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	content, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(opencode.json) error = %v", err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, `"sdd-orchestrator-cheap"`) {
+		t.Error("opencode.json missing sdd-orchestrator-cheap")
+	}
+	if !strings.Contains(text, `"sdd-orchestrator-premium"`) {
+		t.Error("opencode.json missing sdd-orchestrator-premium")
 	}
 }

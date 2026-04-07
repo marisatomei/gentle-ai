@@ -33,6 +33,11 @@ type InjectOptions struct {
 	// <!-- gentle-ai:strict-tdd-mode --> marker section is injected into
 	// the agent's system prompt so agents know Strict TDD is active.
 	StrictTDD bool
+
+	// Profiles lists named SDD profiles to generate and merge into the
+	// OpenCode settings file. The default profile (Name="" or Name="default")
+	// is skipped — it is handled by the existing flow.
+	Profiles []model.Profile
 }
 
 // workflowInjector is an optional adapter capability: if an adapter
@@ -295,7 +300,16 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			// NOT contain model fields — otherwise the deep merge overwrites
 			// whatever the user already has in opencode.json.
 			overlayBytes := []byte(overlayContent)
-			overlayBytes, err = inlineOpenCodeSDDPrompts(overlayBytes)
+			// For multi-mode, write shared prompt files before inlining references.
+			if sddMode == model.SDDModeMulti {
+				promptsChanged, promptsErr := WriteSharedPromptFiles(homeDir)
+				if promptsErr != nil {
+					return InjectionResult{}, fmt.Errorf("write shared SDD prompt files: %w", promptsErr)
+				}
+				changed = changed || promptsChanged
+			}
+
+			overlayBytes, err = inlineOpenCodeSDDPrompts(overlayBytes, homeDir)
 			if err != nil {
 				return InjectionResult{}, fmt.Errorf("inline OpenCode SDD prompts: %w", err)
 			}
@@ -339,6 +353,26 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			}
 			changed = changed || pluginResult.Changed
 			files = append(files, pluginResult.Files...)
+
+			// Inject named profiles (if any). Each profile generates 11 agent
+			// definitions (orchestrator + 10 phases) and merges them into
+			// opencode.json. The default profile (empty name or "default") is
+			// handled by the existing overlay flow above and is skipped here.
+			for _, profile := range opts.Profiles {
+				if profile.Name == "" || profile.Name == "default" {
+					continue
+				}
+				profileOverlay, profileErr := GenerateProfileOverlay(profile, homeDir)
+				if profileErr != nil {
+					return InjectionResult{}, fmt.Errorf("generate profile overlay %q: %w", profile.Name, profileErr)
+				}
+				profileResult, profileErr := mergeJSONFile(settingsPath, profileOverlay)
+				if profileErr != nil {
+					return InjectionResult{}, fmt.Errorf("merge profile overlay %q: %w", profile.Name, profileErr)
+				}
+				changed = changed || profileResult.writeResult.Changed
+				mergedSettingsBytes = profileResult.merged
+			}
 		}
 	}
 
@@ -377,7 +411,7 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			sddSkills := []string{
 				"sdd-init", "sdd-explore", "sdd-propose", "sdd-spec",
 				"sdd-design", "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
-				"judgment-day",
+				"sdd-onboard", "judgment-day",
 			}
 
 			for _, skill := range sddSkills {
@@ -529,6 +563,25 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 				return InjectionResult{}, fmt.Errorf("post-check: %q missing sdd-apply sub-agent — multi-mode overlay was not injected correctly", settingsPath)
 			}
 		}
+
+		// Verify profile orchestrators were injected correctly.
+		// For each named profile, check that sdd-orchestrator-{name} is present
+		// in the merged settings. A missing key means the overlay merge silently failed.
+		for _, profile := range opts.Profiles {
+			if profile.Name == "" || profile.Name == "default" {
+				continue
+			}
+			orchKey := `"sdd-orchestrator-` + profile.Name + `"`
+			if !strings.Contains(settingsText, orchKey) {
+				// Last-resort disk read.
+				if diskBytes, readErr := os.ReadFile(settingsPath); readErr == nil {
+					settingsText = string(diskBytes)
+				}
+				if !strings.Contains(settingsText, orchKey) {
+					return InjectionResult{}, fmt.Errorf("post-check: %q missing profile orchestrator %q — profile overlay was not injected correctly", settingsPath, "sdd-orchestrator-"+profile.Name)
+				}
+			}
+		}
 	}
 
 	if adapter.SupportsSkills() {
@@ -550,7 +603,7 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 	return InjectionResult{Changed: changed, Files: files}, nil
 }
 
-func inlineOpenCodeSDDPrompts(overlayBytes []byte) ([]byte, error) {
+func inlineOpenCodeSDDPrompts(overlayBytes []byte, homeDir string) ([]byte, error) {
 	var overlay map[string]any
 	if err := json.Unmarshal(overlayBytes, &overlay); err != nil {
 		return nil, fmt.Errorf("unmarshal OpenCode SDD overlay: %w", err)
@@ -565,6 +618,7 @@ func inlineOpenCodeSDDPrompts(overlayBytes []byte) ([]byte, error) {
 		return overlayBytes, nil
 	}
 
+	// Inline the orchestrator prompt (always inlined, not a file reference).
 	orchestratorRaw, ok := agentsMap["sdd-orchestrator"]
 	if !ok {
 		return overlayBytes, nil
@@ -573,8 +627,27 @@ func inlineOpenCodeSDDPrompts(overlayBytes []byte) ([]byte, error) {
 	if !ok {
 		return overlayBytes, nil
 	}
-
 	orchestratorMap["prompt"] = assets.MustRead("generic/sdd-orchestrator.md")
+
+	// Replace sub-agent prompt placeholders with {file:<absolutePath>} references.
+	// The placeholder format is __PROMPT_FILE_{phase}__ where {phase} is the agent name.
+	if homeDir != "" {
+		promptDir := SharedPromptDir(homeDir)
+		for _, phase := range subAgentPhaseOrder {
+			agentRaw, exists := agentsMap[phase]
+			if !exists {
+				continue
+			}
+			agentMap, ok := agentRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			placeholder := "__PROMPT_FILE_" + phase + "__"
+			if prompt, _ := agentMap["prompt"].(string); prompt == placeholder {
+				agentMap["prompt"] = "{file:" + filepath.Join(promptDir, phase+".md") + "}"
+			}
+		}
+	}
 
 	result, err := json.MarshalIndent(overlay, "", "  ")
 	if err != nil {
@@ -1021,6 +1094,9 @@ func injectMarkdownSections(homeDir string, adapter agents.Adapter, assignments 
 	if err != nil {
 		return InjectionResult{}, err
 	}
+
+	// Strip legacy Agent Teams Lite block (from standalone ATL installer).
+	existing = filemerge.StripLegacyATLBlock(existing)
 
 	// If bare (un-marked) orchestrator content exists but the HTML markers are
 	// not present, strip the bare block first. This migrates legacy files to the

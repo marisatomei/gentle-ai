@@ -16,7 +16,6 @@
 | Codex | `codex` | Yes | Yes | Solo-agent | No | No | `~/.codex` |
 | Windsurf | `windsurf` | Yes (native) | Yes | Solo-agent | No | No | `~/.codeium/windsurf` |
 | Antigravity | `antigravity` | Yes (native) | Yes | Solo-agent + Mission Control | No | No | `~/.gemini/antigravity` |
-| Copilot CLI | `copilot-cli` | Yes | Yes | Full (custom agents) | No | No | `~/.copilot` |
 
 All agents receive the **full SDD orchestrator** injected into their system prompt, plus skill files written to their skills directory. The agent handles SDD automatically when the task is large enough, or when the user explicitly asks for it — no manual setup required.
 
@@ -26,7 +25,7 @@ All agents receive the **full SDD orchestrator** injected into their system prom
 
 | Model | How It Works | Agents |
 |-------|-------------|--------|
-| **Full (sub-agents)** | Each SDD phase runs in an isolated context window via native sub-agent delegation. The orchestrator coordinates; sub-agents execute. | Claude Code, OpenCode, Gemini CLI, Cursor, VS Code Copilot, Copilot CLI |
+| **Full (sub-agents)** | Each SDD phase runs in an isolated context window via native sub-agent delegation. The orchestrator coordinates; sub-agents execute. | Claude Code, OpenCode, Gemini CLI, Cursor, VS Code Copilot |
 | **Solo-agent** | All SDD phases run inline in the same conversation. The orchestrator IS the executor. Engram provides cross-phase persistence. | Codex, Windsurf, Antigravity |
 
 ### Cursor Native Subagents
@@ -35,14 +34,6 @@ Cursor uses its built-in `.cursor/agents/` system. `gentle-ai` writes 9 agent fi
 
 - `sdd-explore` and `sdd-verify` run with `readonly: true`
 - Each subagent gets its own context window (fresh context, no pollution)
-- The orchestrator resolves compact rules from the skill registry and passes them in the invocation message
-
-### Copilot CLI Custom Agents
-
-Copilot CLI supports custom agents stored as `.agent.md` files in `~/.copilot/agents/`. `gentle-ai` writes 9 agent files — one per SDD phase. The main agent auto-delegates to the correct subagent based on the `description` field in each file's YAML frontmatter.
-
-- Sub-agents run in isolated context windows
-- Each subagent reads its skill file from `~/.copilot/instructions/sdd-{phase}/SKILL.md`
 - The orchestrator resolves compact rules from the skill registry and passes them in the invocation message
 
 ### Windsurf Cascade
@@ -62,11 +53,11 @@ Antigravity is an agent-first platform with built-in sub-agents (Browser, Termin
 
 ## SDD Mode Support
 
-| Feature | Claude Code | OpenCode | Gemini CLI | Cursor | VS Code Copilot | Codex | Windsurf | Antigravity | Copilot CLI |
-|---------|:-----------:|:--------:|:----------:|:------:|:---------------:|:-----:|:--------:|:-----------:|:-----------:|
-| SDD orchestrator | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| Single-mode SDD | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| Multi-mode SDD | — | Yes | — | — | — | — | — | — | — |
+| Feature | Claude Code | OpenCode | Gemini CLI | Cursor | VS Code Copilot | Codex | Windsurf | Antigravity |
+|---------|:-----------:|:--------:|:----------:|:------:|:---------------:|:-----:|:--------:|:-----------:|
+| SDD orchestrator | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| Single-mode SDD | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| Multi-mode SDD | — | Yes | — | — | — | — | — | — |
 
 **Multi-mode** (assigning different AI models to each SDD phase) is an **OpenCode-only** feature because it requires OpenCode's provider system to route phases to specific models. All other agents run in **single-mode** — the orchestrator manages everything using whatever model the agent is already running.
 
@@ -120,12 +111,3 @@ Antigravity is an agent-first platform with built-in sub-agents (Browser, Termin
 - System prompt appended to `~/.gemini/GEMINI.md` (shared with Gemini CLI — collision check warns if both are installed)
 - Mission Control handles built-in sub-agent delegation (Browser, Terminal) automatically
 - Settings managed via the IDE's Agent settings UI, not via `settings.json`
-
-### Copilot CLI
-- GitHub Copilot terminal agent (`copilot` binary)
-- Install via `brew install copilot-cli`, `winget install GitHub.Copilot`, or `npm install -g @github/copilot`
-- Native custom agents via `~/.copilot/agents/sdd-{phase}.agent.md` (9 files installed by gentle-ai)
-- Instructions at `~/.copilot/instructions/gentle-ai.md`
-- Skills at `~/.copilot/instructions/` (discovered as instruction files)
-- MCP config at `~/.copilot/mcp-config.json`
-- Shares `~/.copilot/` root with VS Code Copilot but uses different subdirectories

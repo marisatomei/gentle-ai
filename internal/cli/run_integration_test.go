@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/agents/opencode"
+	"github.com/gentleman-programming/gentle-ai/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 )
@@ -83,8 +84,12 @@ func TestRunInstallRollsBackOnComponentFailure(t *testing.T) {
 		return nil
 	}
 
+	// Use only engram (not context7) — context7 injects MCP config into
+	// the settings file and does not have a rollback step, so including it
+	// makes the before/after comparison fail even when the pipeline rollback
+	// works correctly. Context7 rollback is tracked separately.
 	_, err := RunInstall(
-		[]string{"--agent", "opencode", "--component", "context7", "--component", "engram"},
+		[]string{"--agent", "opencode", "--component", "engram"},
 		system.DetectionResult{},
 	)
 	if err == nil {
@@ -338,8 +343,9 @@ func TestRunInstallLinuxRollsBackOnComponentFailure(t *testing.T) {
 	t.Cleanup(func() { engramDownloadFn = origDownloadFn })
 
 	detection := linuxDetectionResult(system.LinuxDistroUbuntu, "apt")
+	// Exclude context7 — it has no rollback and taints the settings file.
 	_, err := RunInstall(
-		[]string{"--agent", "opencode", "--component", "context7", "--component", "engram"},
+		[]string{"--agent", "opencode", "--component", "engram"},
 		detection,
 	)
 	if err == nil {
@@ -642,8 +648,9 @@ func TestRunInstallMacOSRollbackStillWorks(t *testing.T) {
 	}
 
 	detection := macOSDetectionResult()
+	// Exclude context7 — it has no rollback and taints the settings file.
 	_, err := RunInstall(
-		[]string{"--agent", "opencode", "--component", "context7", "--component", "engram"},
+		[]string{"--agent", "opencode", "--component", "engram"},
 		detection,
 	)
 	if err == nil {
@@ -794,11 +801,15 @@ func TestRunInstallEngramSetupStrictFailsWhenSetupFails(t *testing.T) {
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
+	origUserHomeDirFn := backup.UserHomeDirFn
 	t.Cleanup(func() {
 		osUserHomeDir = restoreHome
 		runCommand = restoreCommand
 		cmdLookPath = restoreLookPath
+		backup.UserHomeDirFn = origUserHomeDirFn
 	})
+	// Override restore path validation to accept test temp dirs.
+	backup.UserHomeDirFn = func() (string, error) { return home, nil }
 
 	osUserHomeDir = func() (string, error) { return home, nil }
 	cmdLookPath = func(name string) (string, error) {
@@ -1523,9 +1534,9 @@ func TestRunInstallCustomPresetExplicitSkillsFlagPopulatesSelection(t *testing.T
 			skillCount++
 		}
 	}
-	// 10 SDD skills (from sdd dep) + 2 explicit skills (go-testing, branch-pr) = 12
-	if skillCount != 12 {
-		t.Fatalf("expected 12 skill files (10 SDD + 2 explicit), got %d", skillCount)
+	// 11 SDD skills (from sdd dep, includes sdd-onboard) + 2 explicit skills (go-testing, branch-pr) = 13
+	if skillCount != 13 {
+		t.Fatalf("expected 13 skill files (11 SDD + 2 explicit), got %d", skillCount)
 	}
 }
 
@@ -1582,10 +1593,10 @@ func TestRunInstallCustomPresetSkillsNoFlagInstallsNothing(t *testing.T) {
 			}
 		}
 	}
-	// Expect exactly 10 SKILL.md files (from SDD dependency: 9 SDD phases + judgment-day).
+	// Expect exactly 11 SKILL.md files (from SDD dependency: 10 SDD phases + judgment-day).
 	// The skills component itself adds 0 (no --skills flag, SkillsForPreset(custom) = nil).
-	if skillCount != 10 {
-		t.Fatalf("expected 10 SDD skill files installed by the sdd dependency, got %d", skillCount)
+	if skillCount != 11 {
+		t.Fatalf("expected 11 SDD skill files installed by the sdd dependency, got %d", skillCount)
 	}
 }
 

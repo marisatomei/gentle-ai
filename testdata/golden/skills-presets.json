@@ -11,11 +11,13 @@
       "sdd-apply",
       "sdd-verify",
       "sdd-archive",
+      "sdd-onboard",
       "judgment-day",
       "go-testing",
       "skill-creator",
       "branch-pr",
-      "issue-creation"
+      "issue-creation",
+      "skill-registry"
     ]
   },
   {
@@ -30,11 +32,13 @@
       "sdd-apply",
       "sdd-verify",
       "sdd-archive",
+      "sdd-onboard",
       "judgment-day",
       "go-testing",
       "skill-creator",
       "branch-pr",
-      "issue-creation"
+      "issue-creation",
+      "skill-registry"
     ]
   },
   {
@@ -49,6 +53,7 @@
       "sdd-apply",
       "sdd-verify",
       "sdd-archive",
+      "sdd-onboard",
       "judgment-day"
     ]
   }

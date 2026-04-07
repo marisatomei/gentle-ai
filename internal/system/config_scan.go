@@ -2,7 +2,6 @@ package system
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -14,9 +13,6 @@ type ConfigState struct {
 	Path        string
 	Exists      bool
 	IsDirectory bool
-	// Binary is the CLI binary name to probe via PATH (optional).
-	// When set, Exists is determined by exec.LookPath instead of os.Stat on Path.
-	Binary string
 }
 
 // knownAgentConfigDirs enumerates every agent's GlobalConfigDir as a
@@ -37,7 +33,6 @@ func knownAgentConfigDirs(homeDir string) []ConfigState {
 		{Agent: "codex", Path: filepath.Join(homeDir, ".codex")},
 		{Agent: "antigravity", Path: filepath.Join(homeDir, ".gemini", "antigravity")},
 		{Agent: "windsurf", Path: filepath.Join(homeDir, ".codeium", "windsurf")},
-		{Agent: "copilot-cli", Path: filepath.Join(homeDir, ".copilot"), Binary: "copilot"},
 	}
 }
 
@@ -48,17 +43,9 @@ func vscodeCopilotGlobalConfigDir(homeDir string) string {
 	return filepath.Join(homeDir, ".copilot")
 }
 
-// lookPathFunc is the function used to probe for binaries on PATH.
-// Package-level var for testability.
-var lookPathFunc = exec.LookPath
-
 // ScanConfigs returns the presence state of every known managed agent's global
 // config directory. All agents are always represented in the result; Exists and
 // IsDirectory reflect the actual filesystem state at call time.
-//
-// For agents with a Binary field set, detection uses exec.LookPath on the binary
-// name instead of checking the config directory. This distinguishes agents like
-// copilot-cli (binary "copilot") from vscode-copilot (which shares ~/.copilot).
 //
 // This is a compatibility shim: it preserves the ConfigState contract for TUI
 // and validation callers while the canonical discovery (agents.DiscoverInstalled)
@@ -68,13 +55,6 @@ func ScanConfigs(homeDir string) []ConfigState {
 	states := knownAgentConfigDirs(homeDir)
 
 	for idx := range states {
-		if states[idx].Binary != "" {
-			// Detect by binary presence on PATH.
-			_, err := lookPathFunc(states[idx].Binary)
-			states[idx].Exists = err == nil
-			continue
-		}
-
 		info, err := os.Stat(states[idx].Path)
 		if err != nil {
 			continue

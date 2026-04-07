@@ -42,6 +42,18 @@ func RunArgs(args []string, stdout io.Writer) error {
 	cli.AppVersion = Version
 	upgrade.AppVersion = Version
 
+	// Info commands: no system detection, no self-update, no platform validation.
+	if len(args) > 0 {
+		switch args[0] {
+		case "version", "--version", "-v":
+			_, _ = fmt.Fprintf(stdout, "gentle-ai %s\n", Version)
+			return nil
+		case "help", "--help", "-h":
+			printHelp(stdout, Version)
+			return nil
+		}
+	}
+
 	if err := system.EnsureCurrentOSSupported(); err != nil {
 		return err
 	}
@@ -77,6 +89,9 @@ func RunArgs(args []string, stdout io.Writer) error {
 		m.RenameBackupFn = func(manifest backup.Manifest, newDesc string) error {
 			return backup.RenameBackup(manifest, newDesc)
 		}
+		m.TogglePinFn = func(manifest backup.Manifest) error {
+			return backup.TogglePin(manifest)
+		}
 		m.ListBackupsFn = ListBackups
 		m.Backups = ListBackups()
 		m.UpgradeFn = tuiUpgrade(profile, homeDir)
@@ -87,9 +102,6 @@ func RunArgs(args []string, stdout io.Writer) error {
 	}
 
 	switch args[0] {
-	case "version", "--version", "-v":
-		_, _ = fmt.Fprintf(stdout, "gentle-ai %s\n", Version)
-		return nil
 	case "update":
 		profile := cli.ResolveInstallProfile(result)
 		return runUpdate(context.Background(), Version, profile, stdout)
@@ -119,7 +131,7 @@ func RunArgs(args []string, stdout io.Writer) error {
 	case "restore":
 		return cli.RunRestore(args[1:], stdout)
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		return fmt.Errorf("unknown command %q — run 'gentle-ai help' for available commands", args[0])
 	}
 }
 
@@ -289,6 +301,15 @@ func applyOverrides(selection *model.Selection, overrides *model.SyncOverrides) 
 	}
 	if overrides.StrictTDD != nil {
 		selection.StrictTDD = *overrides.StrictTDD
+	}
+	if len(overrides.Profiles) > 0 {
+		selection.Profiles = overrides.Profiles
+		// Profiles are an OpenCode multi-mode feature — if profiles are being
+		// created/synced, SDDModeMulti is required so that WriteSharedPromptFiles
+		// runs and the {file:...} prompt references resolve correctly.
+		if selection.SDDMode == "" {
+			selection.SDDMode = model.SDDModeMulti
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -25,6 +26,12 @@ var engramDownloadFn = engram.DownloadLatestBinary
 // Package-level var for testability.
 var scriptHTTPClient = &http.Client{Timeout: 2 * time.Minute}
 
+// maxScriptSize is the maximum number of bytes read from a downloaded install.sh.
+// This prevents unbounded memory use if the server returns an unexpectedly large body.
+// Note: HTTPS provides transport security but NOT content integrity — a compromised
+// server or CDN could still serve a malicious script within this size limit.
+const maxScriptSize = 1 * 1024 * 1024 // 1 MB
+
 // runStrategy executes the upgrade for a single tool using the appropriate strategy
 // for the given platform profile.
 //
@@ -33,7 +40,8 @@ var scriptHTTPClient = &http.Client{Timeout: 2 * time.Minute}
 //   - go-install method + apt/pacman/other → goInstallUpgrade
 //   - binary method + linux/darwin → binaryUpgrade
 //   - binary method + windows → manualFallback (Phase 1: self-replace deferred)
-//   - script method + linux/darwin → scriptUpgrade (curl | bash install.sh)
+//   - script method + linux/darwin + gga → ggaScriptUpgrade (git clone approach)
+//   - script method + linux/darwin + other → scriptUpgrade (curl | bash install.sh)
 //   - script method + windows → manualFallback
 //   - unknown method → manualFallback with explicit message
 func runStrategy(ctx context.Context, r update.UpdateResult, profile system.PlatformProfile) error {
@@ -47,6 +55,14 @@ func runStrategy(ctx context.Context, r update.UpdateResult, profile system.Plat
 	case update.InstallBinary:
 		return binaryUpgrade(ctx, r, profile)
 	case update.InstallScript:
+		// GGA's install.sh expects to run from within a cloned repo — it references
+		// $SCRIPT_DIR/bin/gga and $SCRIPT_DIR/lib/*.sh. The generic scriptUpgrade
+		// only downloads and runs the script in isolation (bash -c <content>), which
+		// breaks because those relative paths don't exist. Use the git clone approach
+		// (same as the initial install resolver) for GGA specifically.
+		if r.Tool.Name == "gga" {
+			return ggaScriptUpgrade(ctx, r)
+		}
 		return scriptUpgrade(ctx, r, profile)
 	default:
 		return &ManualFallbackError{
@@ -194,9 +210,12 @@ func scriptUpgrade(ctx context.Context, r update.UpdateResult, profile system.Pl
 		return fmt.Errorf("download install.sh: HTTP %d from %s", resp.StatusCode, url)
 	}
 
-	scriptBody, err := io.ReadAll(resp.Body)
+	scriptBody, err := io.ReadAll(io.LimitReader(resp.Body, maxScriptSize+1))
 	if err != nil {
 		return fmt.Errorf("download install.sh: read body: %w", err)
+	}
+	if int64(len(scriptBody)) > maxScriptSize {
+		return fmt.Errorf("download install.sh: response body exceeds %d bytes limit", maxScriptSize)
 	}
 
 	// Execute install.sh with bash. Stdin is nil to ensure non-interactive mode.
@@ -206,6 +225,69 @@ func scriptUpgrade(ctx context.Context, r update.UpdateResult, profile system.Pl
 		// Provide a helpful hint if the script fails.
 		output := strings.TrimSpace(string(out))
 		return fmt.Errorf("install.sh failed for %q: %w\nOutput: %s", r.Tool.Name, err, output)
+	}
+
+	return nil
+}
+
+// ggaMkdirTemp is the function used to create a temporary directory for GGA git clone.
+// Package-level var for testability — swapped in tests to control the temp dir path.
+var ggaMkdirTemp = func() (string, error) {
+	return os.MkdirTemp("", "gentle-ai-gga-*")
+}
+
+// ggaScriptUpgrade upgrades GGA by cloning its repository and running install.sh
+// from within the cloned repo — the same approach used by the initial install resolver.
+//
+// This is required because GGA's install.sh references $SCRIPT_DIR/bin/gga and
+// $SCRIPT_DIR/lib/*.sh (relative to the cloned repo). The generic scriptUpgrade
+// downloads and runs the script in isolation via `bash -c <content>`, which fails
+// because those relative paths don't exist without the full repo context.
+//
+// On Windows, bash is not available — returns ManualFallbackError.
+func ggaScriptUpgrade(ctx context.Context, r update.UpdateResult) error {
+	return ggaScriptUpgradeForOS(ctx, r, detectOS())
+}
+
+// detectOS returns the current runtime OS name. Package-level var for testability.
+var detectOS = func() string {
+	return runtime.GOOS
+}
+
+// ggaScriptUpgradeForOS is the testable version of ggaScriptUpgrade that accepts
+// an explicit OS string so tests can simulate Windows without actually running on it.
+func ggaScriptUpgradeForOS(ctx context.Context, r update.UpdateResult, osName string) error {
+	if osName == "windows" {
+		hint := r.UpdateHint
+		if hint == "" {
+			hint = fmt.Sprintf("Download manually from https://github.com/%s/%s/releases", r.Tool.Owner, r.Tool.Repo)
+		}
+		return &ManualFallbackError{
+			Hint: fmt.Sprintf("upgrade %q on Windows requires manual update: %s", r.Tool.Name, hint),
+		}
+	}
+
+	// Use an unpredictable temp directory to avoid TOCTOU races on the fixed path.
+	tmpDir, err := ggaMkdirTemp()
+	if err != nil {
+		return fmt.Errorf("create temp dir for gga clone: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Clone the full repository — install.sh needs the entire repo context.
+	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", r.Tool.Owner, r.Tool.Repo)
+	cloneCmd := execCommand("git", "clone", repoURL, tmpDir)
+	cloneCmd.Stdin = nil
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone %s: %w (output: %s)", r.Tool.Repo, err, strings.TrimSpace(string(out)))
+	}
+
+	// Execute install.sh from within the cloned repo (non-interactive).
+	installScript := filepath.Join(tmpDir, "install.sh")
+	installCmd := execCommand("bash", installScript)
+	installCmd.Stdin = nil
+	if out, err := installCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("install.sh failed for %q: %w\nOutput: %s", r.Tool.Name, err, strings.TrimSpace(string(out)))
 	}
 
 	return nil
