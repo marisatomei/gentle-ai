@@ -112,6 +112,57 @@ const (
 	SDDModeMulti  SDDModeID = "multi"
 )
 
+// CopilotModelID is the model identifier string used in Copilot CLI agent frontmatter.
+// The empty string means "inherit from session" (omit the model field).
+type CopilotModelID string
+
+const (
+	CopilotModelDefault   CopilotModelID = ""
+	CopilotModelSonnet45  CopilotModelID = "claude-sonnet-4.5"
+	CopilotModelOpus45    CopilotModelID = "claude-opus-4.5"
+	CopilotModelHaiku45   CopilotModelID = "claude-haiku-4.5"
+	CopilotModelSonnet46  CopilotModelID = "claude-sonnet-4.6"
+	CopilotModelGPT41     CopilotModelID = "gpt-4.1"
+	CopilotModelGPT41Mini CopilotModelID = "gpt-4.1-mini"
+)
+
+// copilotPhases is the ordered list of SDD phase keys for Copilot CLI.
+var copilotPhases = []string{
+	"sdd-init", "sdd-explore", "sdd-propose", "sdd-spec",
+	"sdd-design", "sdd-tasks", "sdd-apply", "sdd-verify", "sdd-archive",
+}
+
+// CopilotPhases returns the ordered list of SDD phase keys for Copilot CLI.
+func CopilotPhases() []string {
+	return copilotPhases
+}
+
+// CopilotModelPresetDefault returns the default assignments (all inherit from session).
+func CopilotModelPresetDefault() map[string]CopilotModelID {
+	return map[string]CopilotModelID{}
+}
+
+// CopilotModelPresetPerformance returns the performance preset (all claude-opus-4.5).
+func CopilotModelPresetPerformance() map[string]CopilotModelID {
+	out := map[string]CopilotModelID{}
+	for _, p := range copilotPhases {
+		out[p] = CopilotModelOpus45
+	}
+	return out
+}
+
+// CopilotModelPresetEconomy returns the economy preset.
+// Most phases use haiku; spec and verify use sonnet for quality.
+func CopilotModelPresetEconomy() map[string]CopilotModelID {
+	out := map[string]CopilotModelID{}
+	for _, p := range copilotPhases {
+		out[p] = CopilotModelHaiku45
+	}
+	out["sdd-verify"] = CopilotModelSonnet45
+	out["sdd-spec"] = CopilotModelSonnet45
+	return out
+}
+
 // Profile represents a named SDD orchestrator configuration with model assignments.
 // The default profile (Name="" or Name="default") maps to the base sdd-orchestrator.
 // Named profiles generate sdd-orchestrator-{Name} + suffixed sub-agents.

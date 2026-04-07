@@ -9,8 +9,9 @@ type Selection struct {
 	SDDMode                SDDModeID
 	StrictTDD              bool
 	ModelAssignments       map[string]ModelAssignment  // key = sub-agent name (e.g., "sdd-init")
-	ClaudeModelAssignments map[string]ClaudeModelAlias // key = phase name; value = opus|sonnet|haiku
-	Profiles               []Profile                   // named SDD profiles to generate/update during sync
+	ClaudeModelAssignments  map[string]ClaudeModelAlias  // key = phase name; value = opus|sonnet|haiku
+	CopilotModelAssignments map[string]CopilotModelID   // key = phase name; value = model ID (empty = inherit)
+	Profiles                []Profile                   // named SDD profiles to generate/update during sync
 }
 
 func (s Selection) HasAgent(agent AgentID) bool {
@@ -41,7 +42,8 @@ func (s Selection) HasComponent(component ComponentID) bool {
 // A non-nil but empty map means "reset to defaults" (explicit clear).
 type SyncOverrides struct {
 	ModelAssignments       map[string]ModelAssignment  // nil = no override; empty map = reset to defaults
-	ClaudeModelAssignments map[string]ClaudeModelAlias // nil = no override; empty map = reset to defaults
+	ClaudeModelAssignments  map[string]ClaudeModelAlias  // nil = no override; empty map = reset to defaults
+	CopilotModelAssignments map[string]CopilotModelID   // nil = no override; empty map = reset to defaults
 	SDDMode                SDDModeID                   // "" = no override; when non-empty, overrides the sync's default SDD mode
 	StrictTDD              *bool                       // nil = no override; non-nil = override strict TDD mode
 	Profiles               []Profile                   // NEW: profile creation/updates during sync

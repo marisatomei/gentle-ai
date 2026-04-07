@@ -23,6 +23,7 @@ type InjectionResult struct {
 type InjectOptions struct {
 	OpenCodeModelAssignments map[string]model.ModelAssignment
 	ClaudeModelAssignments   map[string]model.ClaudeModelAlias
+	CopilotModelAssignments  map[string]model.CopilotModelID
 
 	// WorkspaceDir is the root of the current workspace (e.g. os.Getwd()).
 	// When non-empty and the adapter implements workflowInjector, native
@@ -506,6 +507,15 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 				continue
 			}
 			content := assets.MustRead(embeddedDir + "/" + entry.Name())
+
+			// For Copilot CLI agents, inject model: field into frontmatter if assigned.
+			if adapter.Agent() == model.AgentCopilotCLI && len(opts.CopilotModelAssignments) > 0 {
+				phase := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".agent.md"), ".md")
+				if modelID, ok := opts.CopilotModelAssignments[phase]; ok && modelID != "" {
+					content = injectCopilotModelField(content, modelID)
+				}
+			}
+
 			outPath := filepath.Join(agentsDir, entry.Name())
 			writeResult, err := filemerge.WriteFileAtomic(outPath, []byte(content), 0o644)
 			if err != nil {
@@ -1139,6 +1149,21 @@ var claudeModelAssignmentReasons = map[string]string{
 	"sdd-verify":   "Validation against spec",
 	"sdd-archive":  "Copy and close",
 	"default":      "Non-SDD general delegation",
+}
+
+// injectCopilotModelField inserts "model: <id>" into the YAML frontmatter of a
+// Copilot CLI .agent.md file. The frontmatter opens with "---\n" and closes with
+// "\n---\n"; the model field is appended just before the closing marker.
+// If the frontmatter cannot be located, content is returned unchanged.
+func injectCopilotModelField(content string, modelID model.CopilotModelID) string {
+	// Skip the opening "---" (3 chars) and find the next "\n---" which is the closing.
+	closingMarker := "\n---"
+	idx := strings.Index(content[3:], closingMarker)
+	if idx < 0 {
+		return content
+	}
+	insertAt := 3 + idx // absolute position of the \n before closing ---
+	return content[:insertAt] + "\nmodel: " + string(modelID) + content[insertAt:]
 }
 
 func injectClaudeModelAssignments(content string, assignments map[string]model.ClaudeModelAlias) (string, error) {

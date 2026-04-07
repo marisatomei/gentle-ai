@@ -163,6 +163,7 @@ const (
 	ScreenPersona
 	ScreenPreset
 	ScreenClaudeModelPicker
+	ScreenCopilotModelPicker
 	ScreenSDDMode
 	ScreenStrictTDD
 	ScreenDependencyTree
@@ -211,7 +212,8 @@ type Model struct {
 	Execution         pipeline.ExecutionResult
 	Backups           []backup.Manifest
 	ModelPicker       screens.ModelPickerState
-	ClaudeModelPicker screens.ClaudeModelPickerState
+	ClaudeModelPicker  screens.ClaudeModelPickerState
+	CopilotModelPicker screens.CopilotModelPickerState
 	SkillPicker       []model.SkillID
 	Err               error
 
@@ -619,6 +621,8 @@ func (m Model) View() string {
 		return screens.RenderPreset(m.Selection.Preset, m.Cursor)
 	case ScreenClaudeModelPicker:
 		return screens.RenderClaudeModelPicker(m.ClaudeModelPicker, m.Cursor)
+	case ScreenCopilotModelPicker:
+		return screens.RenderCopilotModelPicker(m.CopilotModelPicker, m.Cursor)
 	case ScreenSDDMode:
 		return screens.RenderSDDMode(m.Selection.SDDMode, m.Cursor)
 	case ScreenStrictTDD:
@@ -719,11 +723,55 @@ func (m Model) handleKeyPress(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					m = m.withResetSyncState()
 					m.setScreen(ScreenSync)
+				} else if m.shouldShowCopilotModelPickerScreen() {
+					m.CopilotModelPicker = screens.NewCopilotModelPickerState()
+					m.setScreen(ScreenCopilotModelPicker)
 				} else if m.shouldShowSDDModeScreen() {
 					m.setScreen(ScreenSDDMode)
 				} else if m.Selection.Preset == model.PresetCustom {
 					// Custom preset: dependency plan was already built before model picker.
 					// Check StrictTDD, then skill picker before going to review.
+					if m.shouldShowStrictTDDScreen() {
+						m.setScreen(ScreenStrictTDD)
+					} else if m.shouldShowSkillPickerScreen() {
+						if len(m.SkillPicker) == 0 {
+							m.initSkillPicker()
+						}
+						m.setScreen(ScreenSkillPicker)
+					} else {
+						m.Review = planner.BuildReviewPayload(m.Selection, m.DependencyPlan)
+						m.setScreen(ScreenReview)
+					}
+				} else if m.shouldShowStrictTDDScreen() {
+					m.setScreen(ScreenStrictTDD)
+				} else {
+					m.buildDependencyPlan()
+					m.setScreen(ScreenDependencyTree)
+				}
+			}
+			return m, nil
+		}
+	}
+
+	if m.Screen == ScreenCopilotModelPicker {
+		wasInCustomMode := m.CopilotModelPicker.InCustomMode
+		handled, updated := screens.HandleCopilotModelPickerNav(keyStr, &m.CopilotModelPicker, m.Cursor)
+		if handled {
+			if wasInCustomMode && !m.CopilotModelPicker.InCustomMode {
+				m.Cursor = 0
+			}
+			if updated != nil {
+				m.Selection.CopilotModelAssignments = updated
+				if m.ModelConfigMode {
+					m.ModelConfigMode = false
+					m.PendingSyncOverrides = &model.SyncOverrides{
+						CopilotModelAssignments: updated,
+					}
+					m = m.withResetSyncState()
+					m.setScreen(ScreenSync)
+				} else if m.shouldShowSDDModeScreen() {
+					m.setScreen(ScreenSDDMode)
+				} else if m.Selection.Preset == model.PresetCustom {
 					if m.shouldShowStrictTDDScreen() {
 						m.setScreen(ScreenStrictTDD)
 					} else if m.shouldShowSkillPickerScreen() {
@@ -1108,6 +1156,10 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				}
 			}
 			m.setScreen(ScreenModelPicker)
+		case 2: // Configure Copilot CLI models
+			m.ModelConfigMode = true
+			m.CopilotModelPicker = screens.NewCopilotModelPickerState()
+			m.setScreen(ScreenCopilotModelPicker)
 		default: // Back
 			m.setScreen(ScreenWelcome)
 		}
@@ -1146,6 +1198,11 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				m.setScreen(ScreenClaudeModelPicker)
 				return m, nil
 			}
+			if m.shouldShowCopilotModelPickerScreen() {
+				m.CopilotModelPicker = screens.NewCopilotModelPickerState()
+				m.setScreen(ScreenCopilotModelPicker)
+				return m, nil
+			}
 			if m.shouldShowSDDModeScreen() {
 				m.setScreen(ScreenSDDMode)
 				return m, nil
@@ -1169,6 +1226,22 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.Selection.Preset == model.PresetCustom {
+				m.setScreen(ScreenDependencyTree)
+			} else {
+				m.setScreen(ScreenPreset)
+			}
+			return m, nil
+		}
+	case ScreenCopilotModelPicker:
+		if !m.CopilotModelPicker.InCustomMode && m.Cursor == screens.CopilotModelPickerOptionCount(m.CopilotModelPicker)-1 {
+			if m.ModelConfigMode {
+				m.ModelConfigMode = false
+				m.setScreen(ScreenModelConfig)
+				return m, nil
+			}
+			if m.shouldShowClaudeModelPickerScreen() {
+				m.setScreen(ScreenClaudeModelPicker)
+			} else if m.Selection.Preset == model.PresetCustom {
 				m.setScreen(ScreenDependencyTree)
 			} else {
 				m.setScreen(ScreenPreset)
@@ -1220,12 +1293,14 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Back — in custom preset, return to ClaudeModelPicker if applicable,
+		// Back — in custom preset, return to ClaudeModelPicker/CopilotModelPicker if applicable,
 		// otherwise DependencyTree (component selector).
 		// NOTE: SDDMode back logic is also in goBack() — keep in sync.
 		if m.Selection.Preset == model.PresetCustom {
 			if m.shouldShowClaudeModelPickerScreen() {
 				m.setScreen(ScreenClaudeModelPicker)
+			} else if m.shouldShowCopilotModelPickerScreen() {
+				m.setScreen(ScreenCopilotModelPicker)
 			} else {
 				m.setScreen(ScreenDependencyTree)
 			}
@@ -1233,6 +1308,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			// NOTE: Back logic also in goBack() — keep in sync.
 			if m.shouldShowClaudeModelPickerScreen() {
 				m.setScreen(ScreenClaudeModelPicker)
+			} else if m.shouldShowCopilotModelPickerScreen() {
+				m.setScreen(ScreenCopilotModelPicker)
 			} else {
 				m.setScreen(ScreenPreset)
 			}
@@ -1344,6 +1421,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenSDDMode)
 		} else if m.shouldShowClaudeModelPickerScreen() {
 			m.setScreen(ScreenClaudeModelPicker)
+		} else if m.shouldShowCopilotModelPickerScreen() {
+			m.setScreen(ScreenCopilotModelPicker)
 		} else if m.Selection.Preset == model.PresetCustom {
 			// Custom preset: DependencyTree is the component selector that precedes StrictTDD.
 			m.setScreen(ScreenDependencyTree)
@@ -1362,6 +1441,11 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				if m.shouldShowClaudeModelPickerScreen() {
 					m.ClaudeModelPicker = screens.NewClaudeModelPickerState()
 					m.setScreen(ScreenClaudeModelPicker)
+					return m, nil
+				}
+				if m.shouldShowCopilotModelPickerScreen() {
+					m.CopilotModelPicker = screens.NewCopilotModelPickerState()
+					m.setScreen(ScreenCopilotModelPicker)
 					return m, nil
 				}
 				if m.shouldShowSDDModeScreen() {
@@ -1409,6 +1493,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			}
 		} else if m.shouldShowClaudeModelPickerScreen() {
 			m.setScreen(ScreenClaudeModelPicker)
+		} else if m.shouldShowCopilotModelPickerScreen() {
+			m.setScreen(ScreenCopilotModelPicker)
 		} else {
 			m.setScreen(ScreenPreset)
 		}
@@ -1441,6 +1527,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 					}
 				} else if m.shouldShowClaudeModelPickerScreen() {
 					m.setScreen(ScreenClaudeModelPicker)
+				} else if m.shouldShowCopilotModelPickerScreen() {
+					m.setScreen(ScreenCopilotModelPicker)
 				} else {
 					m.setScreen(ScreenDependencyTree)
 				}
@@ -1474,6 +1562,8 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 				}
 			} else if m.shouldShowClaudeModelPickerScreen() {
 				m.setScreen(ScreenClaudeModelPicker)
+			} else if m.shouldShowCopilotModelPickerScreen() {
+				m.setScreen(ScreenCopilotModelPicker)
 			} else {
 				m.setScreen(ScreenDependencyTree)
 			}
@@ -1825,14 +1915,14 @@ func (m Model) goBack() Model {
 	}
 
 	// ModelConfigMode: pickers reached via Model Config shortcut return to ScreenModelConfig.
-	if m.ModelConfigMode && (m.Screen == ScreenClaudeModelPicker || m.Screen == ScreenModelPicker) {
+	if m.ModelConfigMode && (m.Screen == ScreenClaudeModelPicker || m.Screen == ScreenCopilotModelPicker || m.Screen == ScreenModelPicker) {
 		m.ModelConfigMode = false
 		m.setScreen(ScreenModelConfig)
 		return m
 	}
 
 	// From SkillPicker, go back to the preceding screen.
-	// In custom preset: StrictTDD precedes SkillPicker; SDDMode/ModelPicker/ClaudeModelPicker precede StrictTDD.
+	// In custom preset: StrictTDD precedes SkillPicker; SDDMode/ModelPicker/ClaudeModelPicker/CopilotModelPicker precede StrictTDD.
 	if m.Screen == ScreenSkillPicker {
 		if m.Selection.Preset == model.PresetCustom {
 			if m.shouldShowStrictTDDScreen() {
@@ -1850,6 +1940,8 @@ func (m Model) goBack() Model {
 				}
 			} else if m.shouldShowClaudeModelPickerScreen() {
 				m.setScreen(ScreenClaudeModelPicker)
+			} else if m.shouldShowCopilotModelPickerScreen() {
+				m.setScreen(ScreenCopilotModelPicker)
 			} else {
 				m.setScreen(ScreenDependencyTree)
 			}
@@ -1866,7 +1958,7 @@ func (m Model) goBack() Model {
 	// NOTE: DependencyTree back logic also in confirmSelection() — keep in sync.
 	if m.Screen == ScreenDependencyTree && m.Selection.Preset != model.PresetCustom {
 		if m.shouldShowStrictTDDScreen() {
-			// StrictTDD screen is between (SDDMode/ClaudeModelPicker/Preset) and DependencyTree.
+			// StrictTDD screen is between (SDDMode/ClaudeModelPicker/CopilotModelPicker/Preset) and DependencyTree.
 			m.setScreen(ScreenStrictTDD)
 			return m
 		}
@@ -1874,11 +1966,16 @@ func (m Model) goBack() Model {
 			m.setScreen(ScreenClaudeModelPicker)
 			return m
 		}
+		if m.shouldShowCopilotModelPickerScreen() {
+			m.setScreen(ScreenCopilotModelPicker)
+			return m
+		}
 	}
 
 	// Going back from ScreenStrictTDD depends on which flow brought us here:
 	//   - OpenCode flow: ModelPicker (multi + cache) → SDDMode
 	//   - ClaudeCode flow: ClaudeModelPicker
+	//   - CopilotCLI flow: CopilotModelPicker
 	//   - Custom preset (other agents): DependencyTree (the component selector)
 	//   - Non-custom other agents: Preset
 	if m.Screen == ScreenStrictTDD {
@@ -1898,6 +1995,10 @@ func (m Model) goBack() Model {
 			m.setScreen(ScreenClaudeModelPicker)
 			return m
 		}
+		if m.shouldShowCopilotModelPickerScreen() {
+			m.setScreen(ScreenCopilotModelPicker)
+			return m
+		}
 		// Custom preset: DependencyTree is the component selector that precedes StrictTDD.
 		if m.Selection.Preset == model.PresetCustom {
 			m.setScreen(ScreenDependencyTree)
@@ -1908,14 +2009,16 @@ func (m Model) goBack() Model {
 		return m
 	}
 
-	// In custom preset, going back from SDDMode should return to ClaudeModelPicker
+	// In custom preset, going back from SDDMode should return to ClaudeModelPicker/CopilotModelPicker
 	// if applicable, otherwise DependencyTree (the component selector).
-	// For non-custom, check if ClaudeModelPicker was shown first.
+	// For non-custom, check if ClaudeModelPicker/CopilotModelPicker was shown first.
 	// NOTE: SDDMode back logic is also in confirmSelection — keep in sync.
 	if m.Screen == ScreenSDDMode {
 		if m.Selection.Preset == model.PresetCustom {
 			if m.shouldShowClaudeModelPickerScreen() {
 				m.setScreen(ScreenClaudeModelPicker)
+			} else if m.shouldShowCopilotModelPickerScreen() {
+				m.setScreen(ScreenCopilotModelPicker)
 			} else {
 				m.setScreen(ScreenDependencyTree)
 			}
@@ -1923,6 +2026,10 @@ func (m Model) goBack() Model {
 		}
 		if m.shouldShowClaudeModelPickerScreen() {
 			m.setScreen(ScreenClaudeModelPicker)
+			return m
+		}
+		if m.shouldShowCopilotModelPickerScreen() {
+			m.setScreen(ScreenCopilotModelPicker)
 			return m
 		}
 	}
@@ -1933,8 +2040,19 @@ func (m Model) goBack() Model {
 		return m
 	}
 
+	// In custom preset, going back from CopilotModelPicker should return to ClaudeModelPicker (if applicable)
+	// or DependencyTree.
+	if m.Screen == ScreenCopilotModelPicker && m.Selection.Preset == model.PresetCustom {
+		if m.shouldShowClaudeModelPickerScreen() {
+			m.setScreen(ScreenClaudeModelPicker)
+		} else {
+			m.setScreen(ScreenDependencyTree)
+		}
+		return m
+	}
+
 	// In custom preset, going back from Review walks through intermediate screens.
-	// Order (reverse of forward): SkillPicker → StrictTDD → SDDMode/ModelPicker → ClaudeModelPicker → DependencyTree.
+	// Order (reverse of forward): SkillPicker → StrictTDD → SDDMode/ModelPicker → CopilotModelPicker → ClaudeModelPicker → DependencyTree.
 	if m.Screen == ScreenReview && m.Selection.Preset == model.PresetCustom {
 		if m.shouldShowSkillPickerScreen() {
 			if len(m.SkillPicker) == 0 {
@@ -1962,6 +2080,10 @@ func (m Model) goBack() Model {
 		}
 		if m.shouldShowClaudeModelPickerScreen() {
 			m.setScreen(ScreenClaudeModelPicker)
+			return m
+		}
+		if m.shouldShowCopilotModelPickerScreen() {
+			m.setScreen(ScreenCopilotModelPicker)
 			return m
 		}
 		m.setScreen(ScreenDependencyTree)
@@ -2089,6 +2211,8 @@ func (m Model) optionCount() int {
 		return len(screens.PresetOptions()) + 1
 	case ScreenClaudeModelPicker:
 		return screens.ClaudeModelPickerOptionCount(m.ClaudeModelPicker)
+	case ScreenCopilotModelPicker:
+		return screens.CopilotModelPickerOptionCount(m.CopilotModelPicker)
 	case ScreenSDDMode:
 		return len(screens.SDDModeOptions()) + 1
 	case ScreenStrictTDD:
@@ -2342,6 +2466,11 @@ func (m Model) shouldShowStrictTDDScreen() bool {
 
 func (m Model) shouldShowClaudeModelPickerScreen() bool {
 	return m.Selection.HasAgent(model.AgentClaudeCode) &&
+		hasSelectedComponent(m.Selection.Components, model.ComponentSDD)
+}
+
+func (m Model) shouldShowCopilotModelPickerScreen() bool {
+	return m.Selection.HasAgent(model.AgentCopilotCLI) &&
 		hasSelectedComponent(m.Selection.Components, model.ComponentSDD)
 }
 
