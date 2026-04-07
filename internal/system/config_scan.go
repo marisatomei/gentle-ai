@@ -2,8 +2,13 @@ package system
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 )
+
+// copilotCLILookPath is a package-level variable so tests can override binary detection
+// for Copilot CLI without spawning a real subprocess.
+var copilotCLILookPath = exec.LookPath
 
 // ConfigState records the filesystem presence of an agent's global config directory.
 // All known registry agents are always represented — Exists=false for absent dirs.
@@ -33,6 +38,9 @@ func knownAgentConfigDirs(homeDir string) []ConfigState {
 		{Agent: "codex", Path: filepath.Join(homeDir, ".codex")},
 		{Agent: "antigravity", Path: filepath.Join(homeDir, ".gemini", "antigravity")},
 		{Agent: "windsurf", Path: filepath.Join(homeDir, ".codeium", "windsurf")},
+		// copilot-cli shares ~/.copilot with vscode-copilot, so detection uses the
+		// binary ("copilot" in PATH) rather than the config directory.
+		{Agent: "copilot-cli", Path: filepath.Join(homeDir, ".copilot")},
 	}
 }
 
@@ -55,6 +63,14 @@ func ScanConfigs(homeDir string) []ConfigState {
 	states := knownAgentConfigDirs(homeDir)
 
 	for idx := range states {
+		if states[idx].Agent == "copilot-cli" {
+			// copilot-cli shares ~/.copilot with vscode-copilot, so detect via
+			// binary presence instead of config directory existence.
+			_, err := copilotCLILookPath("copilot")
+			states[idx].Exists = err == nil
+			states[idx].IsDirectory = false
+			continue
+		}
 		info, err := os.Stat(states[idx].Path)
 		if err != nil {
 			continue

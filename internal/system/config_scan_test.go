@@ -2,6 +2,7 @@ package system
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -21,6 +22,12 @@ func TestScanConfigs_ReturnsAllKnownAgentsWithExistsFlag(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
+
+	// Override copilot-cli binary lookup so the result is deterministic
+	// regardless of whether the copilot binary is installed on the host.
+	orig := copilotCLILookPath
+	copilotCLILookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { copilotCLILookPath = orig })
 
 	configs := ScanConfigs(home)
 
@@ -76,6 +83,7 @@ func TestScanConfigs_AgentFieldMatchesModelAgentID(t *testing.T) {
 		"cursor":         false,
 		"vscode-copilot": false,
 		"codex":          false,
+		"copilot-cli":    false,
 	}
 
 	for _, c := range configs {
@@ -110,6 +118,11 @@ func TestScanConfigs_PathFieldIsNonEmpty(t *testing.T) {
 func TestScanConfigs_ExistsFalseWhenDirAbsent(t *testing.T) {
 	home := t.TempDir()
 	// No dirs created — all agents should have Exists=false.
+	// Override copilot-cli binary lookup so it also returns false in CI environments
+	// where the copilot binary might happen to be installed.
+	orig := copilotCLILookPath
+	copilotCLILookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { copilotCLILookPath = orig })
 
 	configs := ScanConfigs(home)
 
@@ -155,6 +168,49 @@ func TestScanConfigs_IsDirectorySetForExistingDirs(t *testing.T) {
 	}
 	if !opencodeFound {
 		t.Error("ScanConfigs() missing opencode entry")
+	}
+}
+
+// TestScanConfigs_CopilotCLIDetectedViaBinary verifies that copilot-cli detection
+// is based on binary presence (not config directory), since ~/.copilot is shared
+// with vscode-copilot.
+func TestScanConfigs_CopilotCLIDetectedViaBinary(t *testing.T) {
+	home := t.TempDir()
+
+	orig := copilotCLILookPath
+	t.Cleanup(func() { copilotCLILookPath = orig })
+
+	// With binary present: Exists=true even without ~/.copilot directory.
+	copilotCLILookPath = func(string) (string, error) { return "/usr/bin/copilot", nil }
+	configs := ScanConfigs(home)
+
+	var state *ConfigState
+	for i := range configs {
+		if configs[i].Agent == "copilot-cli" {
+			state = &configs[i]
+			break
+		}
+	}
+	if state == nil {
+		t.Fatal("ScanConfigs() missing copilot-cli entry")
+	}
+	if !state.Exists {
+		t.Errorf("copilot-cli Exists = false when binary present, want true")
+	}
+	if state.Path == "" {
+		t.Errorf("copilot-cli Path = empty, want ~/.copilot path")
+	}
+
+	// With binary absent: Exists=false even if ~/.copilot directory exists.
+	copilotCLILookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	if err := os.MkdirAll(state.Path, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	configs = ScanConfigs(home)
+	for _, c := range configs {
+		if c.Agent == "copilot-cli" && c.Exists {
+			t.Errorf("copilot-cli Exists = true when binary absent (dir exists), want false")
+		}
 	}
 }
 
