@@ -877,7 +877,53 @@ func TestCheckFiltered_DevBuildSemanticsForGentleAI(t *testing.T) {
 	}
 }
 
-// TestCheckFiltered_DevBuildSkipNotEligible verifies that in a mixed run,
+// TestCheckFiltered_LocalBuildVersionsAreDevBuild verifies that versions with build
+// metadata ("+") or a "-dev." prerelease are treated as DevBuild, not UpdateAvailable.
+// This covers local/branch builds like "1.7.18-dev.146+abc1234".
+func TestCheckFiltered_LocalBuildVersionsAreDevBuild(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(githubRelease{TagName: "v9.9.9"})
+	}))
+	defer server.Close()
+
+	origClient := httpClient
+	origLookPath := lookPath
+	origExecCommand := execCommand
+	origTools := Tools
+	t.Cleanup(func() {
+		httpClient = origClient
+		lookPath = origLookPath
+		execCommand = origExecCommand
+		Tools = origTools
+	})
+
+	httpClient = server.Client()
+	httpClient.Transport = &testTransport{server: server}
+	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	Tools = []ToolInfo{Tools[0]} // gentle-ai only
+
+	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
+
+	cases := []string{
+		"1.7.18-dev.146+abc1234",       // branch build with build metadata
+		"1.7.18+abc1234",               // release-like with build metadata
+		"1.2.3-dev.0+deadbeef+dirty",   // dirty build
+	}
+	for _, version := range cases {
+		results := CheckFiltered(context.Background(), version, profile, nil)
+		if len(results) != 1 {
+			t.Fatalf("[%s] len = %d, want 1", version, len(results))
+		}
+		if results[0].Status != DevBuild {
+			t.Errorf("[%s] status = %q, want DevBuild", version, results[0].Status)
+		}
+	}
+}
+
+
 // gentle-ai with "dev" version gets DevBuild while engram with a real version stays eligible.
 func TestCheckFiltered_DevBuildSkipNotEligible(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

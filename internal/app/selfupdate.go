@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,8 +55,10 @@ func selfUpdate(ctx context.Context, version string, profile system.PlatformProf
 		return nil
 	}
 
-	// Guard 3: dev build — no meaningful version to compare.
-	if version == "dev" {
+	// Guard 3: dev or local build — no meaningful version to compare against upstream.
+	// Versions with build metadata ("+") or a "-dev." prerelease indicate a local or
+	// branch build that should never be auto-replaced by an upstream release.
+	if version == "dev" || strings.Contains(version, "+") || strings.Contains(version, "-dev.") {
 		return nil
 	}
 

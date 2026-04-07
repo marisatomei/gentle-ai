@@ -107,8 +107,12 @@ func checkSingleTool(ctx context.Context, tool ToolInfo, currentBuildVersion str
 	// Check for non-semver local versions.
 	// "dev" is a well-known sentinel for source-built binaries — report as DevBuild
 	// so the upgrade executor knows to skip this tool without treating it as an error.
+	// Versions with build metadata ("+") or a "-dev." prerelease are local builds
+	// and should never be compared against upstream releases.
 	normalizedLocal := normalizeVersion(localVersion)
-	if normalizedLocal == "dev" {
+	if normalizedLocal == "dev" ||
+		strings.Contains(localVersion, "+") ||
+		strings.Contains(localVersion, "-dev.") {
 		result.Status = DevBuild
 		return result
 	}
